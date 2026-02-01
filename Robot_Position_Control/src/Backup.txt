@@ -1,0 +1,473 @@
+#include <Arduino.h>
+#include <TMCStepper.h>
+#include <AccelStepper.h>
+#include <WiFi.h>
+#include <ESPAsyncWebServer.h>
+
+#define EN_PIN_LEFT    32
+#define CS_PIN_LEFT     5
+#define STEP_PIN_LEFT  22
+#define DIR_PIN_LEFT   21
+
+#define EN_PIN_RIGHT   33
+#define CS_PIN_RIGHT    4
+#define STEP_PIN_RIGHT  17
+#define DIR_PIN_RIGHT  16
+
+#define encoderPinA 14 // GPIO 12 pour l'encodeur canal A (green) //14
+#define encoderPinB 13 // GPIO 13 pour l'encodeur canal B (white) //13
+
+#define SCK 18
+#define MISO 19
+#define MOSI 23
+
+#define R_SENSE  0.075f  // Valeur du sense resistor sur ta carte
+
+void printDRVStatus();
+void setupDriver(TMC5160Stepper &driver);
+
+const char* ssid     = "ESP32-Access-Point";
+const char* password = "123456789";
+
+hw_timer_t * leftStepperTimer = NULL;
+hw_timer_t * rightStepperTimer = NULL;
+
+#define revolution 360
+#define motor_step_per_rev 200
+#define step_size 8
+#define encoder_tick_per_rev 600
+#define wheel_radius 22.50  //0.637 pour engrenage
+
+AsyncWebServer server(80);
+
+// HTML web page to handle 3 input fields (inputString, inputInt, inputFloat)
+const char index_html[] PROGMEM = R"rawliteral(
+	<!DOCTYPE HTML><html><head>
+	  <title> Robot moving </title>
+	  <meta name="viewport" content="width=device-width, initial-scale=1">
+	  <script>
+		function submitMessage() {
+		  setTimeout(function(){ document.location.reload(false); }, 500);   
+		}
+	  </script></head><body>
+	  <form action="/get" target="hidden-form">
+		Commande : <input type="text" name="inputString">
+		<input type="submit" value="Submit" onclick="submitMessage()">
+	  </form><br>
+	  <iframe style="display:none" name="hidden-form"></iframe>
+	</body></html>)rawliteral";
+
+float angleReference = 0;
+float distanceReference = 0;
+float outputAngle = 0;
+const float stepDelay = 500;
+
+const char* PARAM_STRING = "inputString";
+bool pageLoaded = false;
+String inputMessage = "";
+
+bool rightFlag = false;
+bool leftFlag = false;
+bool newcommand = false;
+volatile bool leftStepState = false;
+volatile bool rightStepState = false;
+volatile long counter = 0;
+
+portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED; // Mutex pour protéger l'accès au compteur
+TMC5160Stepper leftDriver = TMC5160Stepper(CS_PIN_LEFT, R_SENSE);
+TMC5160Stepper rightDriver = TMC5160Stepper(CS_PIN_RIGHT, R_SENSE);
+AccelStepper leftStepper(AccelStepper::DRIVER, STEP_PIN_LEFT, DIR_PIN_LEFT);  
+AccelStepper rightStepper(AccelStepper::DRIVER, STEP_PIN_RIGHT, DIR_PIN_RIGHT);
+
+void readSerialInputTask(void *parameter);
+void readWifiInputTask(void *parameter);
+void encoderReadTask(void *parameter);
+void rightMotorAngleControlTask(void *parameter);
+void rightMotorDistanceControlTask(void *parameter);
+void leftMotorDistanceControlTask(void *parameter);
+void processCommand(String command);
+
+// Fonction d'interruption pour le canal A de l'encodeur0
+void IRAM_ATTR handleEncoderA() {
+	portENTER_CRITICAL_ISR(&mux);
+	if (digitalRead(encoderPinB) == LOW) {
+	  counter++;
+	} else {
+	  counter--;
+	}
+	portEXIT_CRITICAL_ISR(&mux);
+}
+
+void IRAM_ATTR leftStepperISR() {
+  leftStepState = !leftStepState;
+  gpio_set_level((gpio_num_t)STEP_PIN_LEFT, leftStepState);
+}
+
+void IRAM_ATTR rightStepperISR() {
+  rightStepState = !rightStepState;
+  gpio_set_level((gpio_num_t)STEP_PIN_RIGHT, rightStepState);
+}
+
+void setup()
+{
+	Serial.begin(9600);
+	WiFi.softAP(ssid, password);
+
+	IPAddress IP = WiFi.softAPIP();
+	Serial.print("AP IP address: ");
+	Serial.println(IP);
+
+	// Send web page with input fields to client
+	server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+	request->send_P(200, "text/html", index_html);
+	});
+
+	server.on("/get", HTTP_GET, [] (AsyncWebServerRequest *request) {
+	// GET inputString value from ESP32 WebServer
+	if (request->hasParam(PARAM_STRING)) {
+		inputMessage = request->getParam(PARAM_STRING)->value();
+		pageLoaded = true;
+	}
+	else {
+	inputMessage = "No message sent";
+	}
+	Serial.println(inputMessage);
+	request->send(200, "text/text", inputMessage);
+	});
+
+	server.begin();
+
+	// Declare pins as Outputs
+	SPI.begin(); // SCK=18, MISO=19, MOSI=23 par défaut sur ESP32
+
+	pinMode(EN_PIN_LEFT, OUTPUT);
+	digitalWrite(EN_PIN_LEFT, LOW); // Enable leftdriver
+	pinMode(EN_PIN_RIGHT, OUTPUT);
+	digitalWrite(EN_PIN_RIGHT, LOW); // Enable rightDriver
+	pinMode(STEP_PIN_LEFT, OUTPUT); 
+	pinMode(DIR_PIN_LEFT, OUTPUT);
+	pinMode(STEP_PIN_RIGHT, OUTPUT);
+	pinMode(DIR_PIN_RIGHT, OUTPUT);
+
+	setupDriver(leftDriver);
+	leftStepper.setMaxSpeed(2500);
+	leftStepper.setAcceleration(2500);
+
+	setupDriver(rightDriver);
+	rightStepper.setMaxSpeed(2500);
+	rightStepper.setAcceleration(2500);
+
+	// Declare pins as inputs
+	pinMode(encoderPinA, INPUT_PULLUP);
+	pinMode(encoderPinB, INPUT_PULLUP);
+
+	// Configurer les interruptions pour l'encodeur
+	attachInterrupt(digitalPinToInterrupt(encoderPinA), handleEncoderA, RISING);
+
+	// left Stepper Motor Timer 0 64-bit
+	leftStepperTimer = timerBegin(0, 80, true); // Timer 0, prescaler de 80 (1 tick = 1 µs)
+	timerAttachInterrupt(leftStepperTimer, &leftStepperISR, true);
+	timerAlarmWrite(leftStepperTimer, 400, true); // 400 µs = 2,5 kHz
+
+	// right Stepper Motor Timer 1 64-bit
+	rightStepperTimer = timerBegin(1, 80, true); // Timer 1, prescaler de 80 (1 tick = 1 µs)
+	timerAttachInterrupt(rightStepperTimer, &rightStepperISR, true);
+	timerAlarmWrite(rightStepperTimer, 400, true); // 400 µs = 2,5 kHz
+
+	// Démarrer les tâches sur les cœurs respectifs
+	//xTaskCreatePinnedToCore(rightMotorAngleControlTask, "MotorAngleControl", 4096, NULL, 1, NULL, 1);
+	xTaskCreatePinnedToCore(rightMotorDistanceControlTask, "RigMotorDistanceControl", 4096, NULL, 2, NULL, 0);
+	xTaskCreatePinnedToCore(leftMotorDistanceControlTask, "LeftMotorDistanceControl", 4096, NULL, 2, NULL, 1);
+	xTaskCreatePinnedToCore(encoderReadTask, "EncoderRead", 4096, NULL, 1, NULL, 0);
+	xTaskCreatePinnedToCore(readSerialInputTask, "SerialInputTask", 4096, NULL, 1, NULL, 0);
+	xTaskCreatePinnedToCore(readWifiInputTask, "WifiInputTask", 4096, NULL, 2, NULL, 0);
+	}
+
+void loop()
+{
+
+}
+
+void setupDriver(TMC5160Stepper &driver) {
+  driver.begin();
+  driver.toff(4); 
+  driver.rms_current(1000); // en mA
+  driver.microsteps(4);
+  driver.en_pwm_mode(false);
+  driver.pwm_autoscale(true); // Auto courant
+  driver.VSTART(10);
+  driver.VSTOP(10);
+}
+
+void rightMotorAngleControlTask(void *parameter) {	
+
+	while(1){
+		if(rightFlag){
+		float angleError = angleReference - outputAngle;
+			if(angleError != 0) {
+				if(angleError > 0 && abs(angleError) > 2){
+					// Spin the motor clockwise
+					digitalWrite(DIR_PIN_RIGHT, HIGH);
+					vTaskDelay(1 / portTICK_PERIOD_MS);  // Évite un CPU bloqué
+
+				}
+				else if (angleError < 0 && abs(angleError) > 2){
+					// Spin the motor counterclockwise
+					digitalWrite(DIR_PIN_RIGHT, LOW);
+					vTaskDelay(1 / portTICK_PERIOD_MS);  // Évite un CPU bloqué
+				
+				}
+				else {
+					angleReference = outputAngle;
+					//Serial.print(outputAngle);
+					//Serial.println(" cm");
+				}
+			}
+			else {
+				vTaskDelay(10 / portTICK_PERIOD_MS);  // Évite un CPU bloqué
+			}
+
+		}
+		else {
+			vTaskDelay(10 / portTICK_PERIOD_MS);  // Évite un CPU bloqué
+		}
+
+	}
+}
+
+void rightMotorDistanceControlTask(void *parameter) {
+
+	while(1){
+		if (rightFlag == true){
+		float outputDistance = outputAngle/revolution*2*PI*wheel_radius;
+		float distanceError = distanceReference - outputDistance;
+			if(distanceError != 0) {
+				timerAlarmEnable(rightStepperTimer); // Activate Timer interruptions
+				if(distanceError > 0 && abs(distanceError) > 0.5){
+					// Spin the motor clockwise
+					digitalWrite(DIR_PIN_RIGHT, HIGH);
+					vTaskDelay(1 / portTICK_PERIOD_MS);  // Évite un CPU bloqué
+				}
+				else if (distanceError < 0 && abs(distanceError) > 0.5){
+					// Spin the motor counterclockwise
+					digitalWrite(DIR_PIN_RIGHT, LOW);
+					vTaskDelay(1 / portTICK_PERIOD_MS);  // Évite un CPU bloqué
+				}
+				else {
+					timerAlarmDisable(rightStepperTimer); // Deactivate Timer interruptions
+					distanceReference = outputDistance;
+					rightFlag == false;
+					vTaskDelay(10 / portTICK_PERIOD_MS);  // Évite un CPU bloqué
+
+				}	
+			}
+			else {
+				timerAlarmDisable(rightStepperTimer);
+				vTaskDelay(10 / portTICK_PERIOD_MS);  // Évite un CPU bloqué
+			}
+		}
+		else {
+			timerAlarmDisable(rightStepperTimer);
+			vTaskDelay(10 / portTICK_PERIOD_MS);  // Évite un CPU bloqué
+		}
+
+	}
+
+}
+
+void leftMotorDistanceControlTask(void *parameter) {
+
+	while(1){
+		if (leftFlag == true) {
+		float outputDistance = outputAngle/revolution*2*PI*wheel_radius;
+		float distanceError = distanceReference - outputDistance;
+			if(distanceError != 0) {
+       		timerAlarmEnable(leftStepperTimer); // Activate Timer interruptions
+				if(distanceError > 0 && abs(distanceError) > 0.5){
+					// Spin the motor clockwise
+					digitalWrite(DIR_PIN_LEFT, HIGH);
+					vTaskDelay(1 / portTICK_PERIOD_MS);  // Évite un CPU bloqué
+				}
+				else if (distanceError < 0 && abs(distanceError) > 0.5){
+					// Spin the motor counterclockwise
+					digitalWrite(DIR_PIN_LEFT, LOW);
+					vTaskDelay(1 / portTICK_PERIOD_MS);  // Évite un CPU bloqué
+				}
+				else {
+          			timerAlarmDisable(leftStepperTimer); // Deactivate Timer interruptions
+					distanceReference = outputDistance;
+					leftFlag == false;
+					vTaskDelay(10 / portTICK_PERIOD_MS);  // Évite un CPU bloqué
+				}
+			}
+			else {
+       			timerAlarmDisable(leftStepperTimer);
+				vTaskDelay(10 / portTICK_PERIOD_MS);  // Évite un CPU bloqué
+			}	
+		}		
+		else {
+      		timerAlarmDisable(leftStepperTimer);
+			vTaskDelay(10 / portTICK_PERIOD_MS);  // Évite un CPU bloqué
+		}
+
+		}
+
+}
+
+void encoderReadTask(void *parameter) {
+	long tempCount = 0; // Stockage temporaire du compteur
+  
+	while (1) {
+	  // Vérifie si le compteur a changé
+	  portENTER_CRITICAL(&mux);
+	  long currentCount = counter;
+	  portEXIT_CRITICAL(&mux);
+
+	  outputAngle = currentCount*revolution/encoder_tick_per_rev;
+  
+	  if (currentCount != tempCount) {
+		tempCount = currentCount;
+		Serial.print(outputAngle/revolution*2*PI*wheel_radius);
+		Serial.println(" cm");
+	  }
+	  vTaskDelay(10 / portTICK_PERIOD_MS);  // Évite un CPU bloqué
+	}
+}
+
+void readSerialInputTask(void *parameter) {
+	String inputBuffer = "";  // Stocke la chaîne reçue
+	while (1) {
+		
+		while (Serial.available()) {  // Vérifie si des données sont disponibles
+			char c = Serial.read();
+			if (c == '\n') {  // Si on appuie sur "Enter"
+				if (inputBuffer.length() > 0) {
+					processCommand(inputBuffer);  // Exécuter la commande
+					inputBuffer = "";  // Réinitialiser le buffer
+				}
+			} 
+			else if (c != '\r') {  // Ignorer le retour chariot (Windows)
+				inputBuffer += c;  // Ajouter le caractère à la commande
+			}
+		}
+	vTaskDelay(10 / portTICK_PERIOD_MS);  // Évite un CPU bloqué	
+	}
+}
+
+void readWifiInputTask(void *parameter) {
+	while (1){
+		if (pageLoaded == true){
+			processCommand(inputMessage);
+			pageLoaded = false;
+		}
+
+	vTaskDelay(10 / portTICK_PERIOD_MS);  // Évite un CPU bloqué	
+	}
+}
+
+void processCommand(String command) {
+    command.trim();  
+	float val = 0;
+
+    if (command == "help") {
+        Serial.println("Available commands");
+        Serial.println("  help       - Show the available commands");
+		Serial.println("  right      - Start the right motor");
+        Serial.println("  left       - Start the left motor");
+		Serial.println("  forward    - Start the motors");
+        Serial.println("  stop    	 - Stop the motor");
+        Serial.println("  status     - Show the status of the motor");
+    } 
+    else if (command == "right") {
+        Serial.println("Right Motor started !");
+		rightFlag = true;
+    } 
+	else if (rightFlag == true && leftFlag == false){
+		val = command.toFloat();
+		if (val >=  0) {
+			//angleReference = val;
+			distanceReference = val;
+      newcommand = true;
+		}
+		else {
+			Serial.println("Motor stopped!");
+			leftFlag = false;
+			rightFlag = false;
+		}
+	}
+	else if (command == "left") {
+        Serial.println("Left Motor started !");
+		leftFlag = true;
+    } 
+	else if (leftFlag == true && rightFlag == false){
+		val = command.toFloat();
+		if (val >=  0) {
+			//angleReference = val;
+			distanceReference = val;
+      newcommand = true;
+		}
+		else {
+			Serial.println("Motor stopped!");
+			leftFlag = false;
+			rightFlag = false;
+		}
+	}
+	else if (command == "forward") {
+        Serial.println("Both Motors started !");
+		rightFlag = true;
+		leftFlag = true;
+    } 
+	else if (rightFlag == true && leftFlag == true){
+		val = command.toFloat();
+		if (val >=  0) {
+			//angleReference = command.toFloat();
+			distanceReference = command.toFloat();	
+		}
+		else {
+			Serial.println("Motor stopped!");
+			leftFlag = false;
+			rightFlag = false;
+		}
+	}
+  else if (command == "stop") {
+    Serial.println("Motor stopped!");
+	distanceReference = 0;
+    leftFlag = false;
+    rightFlag = false;
+  } 
+  else if (command == "status") {
+      if (rightFlag == true || leftFlag == true) {
+          Serial.println("Motor started !");
+          printDRVStatus();
+      } else {
+          Serial.println("Motor stopped!");
+      }
+  } 
+  else {
+      Serial.print("❌ Unknown command");
+      Serial.println(command);
+      Serial.println("Tapez 'help' pour voir la liste des commandes.");
+  }
+}
+
+void printDRVStatus() {
+  uint32_t drv_status = leftDriver.DRV_STATUS();
+
+  Serial.println(F("=== DRV_STATUS ==="));
+  Serial.print(F("Hex: 0x")); Serial.println(drv_status, HEX);
+
+  // Bits haut (31 -> 24)
+  Serial.print(F("StallGuard2: ")); Serial.println((drv_status >> 31) & 0x1);
+  Serial.print(F("Standstill : ")); Serial.println((drv_status >> 30) & 0x1);
+  Serial.print(F("Overtemp Warning : ")); Serial.println((drv_status >> 29) & 0x1);
+  Serial.print(F("Overtemp Shutdown: ")); Serial.println((drv_status >> 28) & 0x1);
+  Serial.print(F("Short to GND A   : ")); Serial.println((drv_status >> 2) & 0x1);
+  Serial.print(F("Short to GND B   : ")); Serial.println((drv_status >> 1) & 0x1);
+  Serial.print(F("Open Load A      : ")); Serial.println((drv_status >> 5) & 0x1);
+  Serial.print(F("Open Load B      : ")); Serial.println((drv_status >> 6) & 0x1);
+  Serial.print(F("leftDriver Enabled   : ")); Serial.println((drv_status >> 24) & 0x1 ? "Yes" : "No");
+
+  Serial.println(F("=================="));
+}
+ 
+
