@@ -6,8 +6,8 @@
 #include "motor_control.h"
 
 typedef struct {
-    float distance_travelled_left_wheel, distance_travelled_right_wheel; 
-    float robot_distance_travelled;   
+    float relative_distance_travelled_left_wheel, relative_distance_travelled_right_wheel; 
+    float absolute_distance_travelled_left_wheel, absolute_distance_travelled_right_wheel;   
     float robot_orientation_deg;                 
 } MotionState;
 

@@ -10,8 +10,8 @@
 #define MEDIAN_SIZE 5
 #define AVG_SIZE 10
 
-#define WHEEL_RADIUS 22.50  //0.637 pour engrenage
-#define LENGTH_BETWEEN_ENCODERS_MM 165
+#define WHEEL_RADIUS 22.50f //0.637 pour engrenage
+#define LENGTH_BETWEEN_ENCODERS_MM 180
 
 typedef struct {
     volatile uint32_t rise_time;

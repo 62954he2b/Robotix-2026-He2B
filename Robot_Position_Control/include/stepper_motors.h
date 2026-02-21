@@ -5,7 +5,7 @@
 #include <TMCStepper.h>
 #include <AccelStepper.h>
 
-#define EN_PIN_RIGHT    32
+#define EN_PIN_RIGHT    27
 #define CS_PIN_RIGHT    5
 #define STEP_PIN_RIGHT 22
 #define DIR_PIN_RIGHT   21

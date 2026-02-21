@@ -2,10 +2,13 @@
 #include "rotary_encoder_AS5048.h"
 #include "odometry.h"
 
+#define MOTOR_PERIOD_MS 5
+#define DT_SEC 0.005f
+
 #define CLOCKWISE LOW
 #define ANTI_CLOCKWISE HIGH
-#define ACCEPTABLE_ERROR 0.5
-#define KP 20
+#define ACCEPTABLE_ERROR 0.1
+#define KP 200
 
 const float minimum_frequency = 500;
 const float maximum_frequency = 4000;
@@ -161,9 +164,13 @@ void distance_control_task(void *parameter) {
 
 void right_motor_control_task(void *parameter) {
 
+	const TickType_t period = pdMS_TO_TICKS(MOTOR_PERIOD_MS);
+	TickType_t lastWakeTime = xTaskGetTickCount();
+
 	float current_frequency = maximum_frequency;
 	float previous_frequency = 0;
 	float correction = 0;
+	float last_absolute_angular_position = 0;
 
 	while(1){
 		if (right_motor_enabled == true) {
@@ -171,33 +178,36 @@ void right_motor_control_task(void *parameter) {
 			if (!right_encoder.initialized) {
 				initialize_encoder(&right_encoder);
 				right_encoder.initial_angular_position = right_encoder.current_angular_position;
+				last_absolute_angular_position = left_encoder.filtered_absolute_angular_position;
 				right_motor_state = RUNNING;
 			}
 
-			right_encoder.filtered_relative_angular_position = (-right_encoder.absolute_angular_position + right_encoder.initial_angular_position);
+			right_encoder.filtered_relative_angular_position = -((right_encoder.filtered_absolute_angular_position - last_absolute_angular_position) - right_encoder.initial_angular_position);
 
-			current_position.distance_travelled_right_wheel = ((right_encoder.filtered_relative_angular_position)/revolution*2*PI*WHEEL_RADIUS)/10;
-			float distance_error = right_distance_reference - current_position.distance_travelled_right_wheel;
+			current_position.absolute_distance_travelled_right_wheel = ((right_encoder.filtered_absolute_angular_position)/revolution*2*PI*WHEEL_RADIUS)/10;
+			current_position.relative_distance_travelled_right_wheel = ((right_encoder.filtered_relative_angular_position)/revolution*2*PI*WHEEL_RADIUS)/10;
+			
+			float distance_error = right_distance_reference - current_position.relative_distance_travelled_right_wheel;
 			
 			if(right_distance_reference != 0 && distance_error != 0) {
 				current_frequency = motor_speed_control(distance_error, current_frequency, &rightPID);
 				timerAlarmEnable(right_stepper_timer);
 
 				if (forward_flag && left_motor_enabled && right_motor_enabled) {
-					float driftError = current_position.distance_travelled_right_wheel - current_position.distance_travelled_left_wheel;
+					float driftError = 0 - x_y_position.theta;
 					float kP = KP;
 					if (driftError > 0) {
 						correction = driftError * kP;
 					}
 					
 				}
-				else if (turn_flag && left_motor_enabled && right_motor_enabled) {
-					float driftError = -(current_position.distance_travelled_right_wheel + current_position.distance_travelled_left_wheel);
-					float kP = KP;
-					if (driftError > 0) {
-						correction = driftError * kP;
-					}
-				}
+				// else if (turn_flag && left_motor_enabled && right_motor_enabled) {
+				// 	float driftError = -(current_position.distance_travelled_right_wheel + current_position.distance_travelled_left_wheel);
+				// 	float kP = KP;
+				// 	if (driftError > 0) {
+				// 		correction = driftError * kP;
+				// 	}
+				// }
 				else {
 					correction = 0;
 				}
@@ -212,25 +222,25 @@ void right_motor_control_task(void *parameter) {
 				
 				if(distance_error > 0 && abs(distance_error) > ACCEPTABLE_ERROR){
 					digitalWrite(DIR_PIN_RIGHT, CLOCKWISE);
-					vTaskDelay(1 / portTICK_PERIOD_MS);
+					//vTaskDelay(1 / portTICK_PERIOD_MS);
 				}
 				else if (distance_error < 0 && abs(distance_error) > ACCEPTABLE_ERROR){
 					digitalWrite(DIR_PIN_RIGHT, ANTI_CLOCKWISE);
-					vTaskDelay(1 / portTICK_PERIOD_MS); 
+					//vTaskDelay(1 / portTICK_PERIOD_MS); 
 				}
 				else {
 					timerAlarmDisable(right_stepper_timer); 
 					right_distance_reference = 0;
 					correction = 0;
-					//right_motor_enabled = false;
+					right_motor_enabled = false;
 					right_encoder.initialized = false;
 					right_motor_state = DONE;
-					vTaskDelay(100 / portTICK_PERIOD_MS);
+					//vTaskDelay(100 / portTICK_PERIOD_MS);
 				}
 			}
 			else {
 				timerAlarmDisable(right_stepper_timer);
-				vTaskDelay(10 / portTICK_PERIOD_MS);
+				//vTaskDelay(10 / portTICK_PERIOD_MS);
 			}	
 		}		
 		else {
@@ -239,18 +249,22 @@ void right_motor_control_task(void *parameter) {
 				forward_flag = false;
 			}
 			right_motor_state = IDLE;
-			vTaskDelay(10 / portTICK_PERIOD_MS);
+			//vTaskDelay(10 / portTICK_PERIOD_MS);
 		}
-
+		vTaskDelayUntil(&lastWakeTime, period);
 	}
 
 }
 
 void left_motor_control_task(void *parameter) {
+
+	const TickType_t period = pdMS_TO_TICKS(MOTOR_PERIOD_MS);
+	TickType_t lastWakeTime = xTaskGetTickCount();
 	
 	float current_frequency = maximum_frequency;
 	float previous_frequency = 0;
 	float correction = 0;
+	float last_absolute_angular_position = 0;
 
 	while(1){
 		if (left_motor_enabled == true) {
@@ -258,32 +272,37 @@ void left_motor_control_task(void *parameter) {
 			if (!left_encoder.initialized) {
 				initialize_encoder(&left_encoder);
 				left_encoder.initial_angular_position = left_encoder.current_angular_position;
+				last_absolute_angular_position = left_encoder.filtered_absolute_angular_position;
 				left_motor_state = RUNNING;
 			}
 
-			left_encoder.filtered_relative_angular_position = (left_encoder.absolute_angular_position - left_encoder.initial_angular_position);
+			left_encoder.filtered_relative_angular_position = (left_encoder.filtered_absolute_angular_position - last_absolute_angular_position) - left_encoder.initial_angular_position;
 			
-			current_position.distance_travelled_left_wheel = ((left_encoder.filtered_relative_angular_position)/revolution*2*PI*WHEEL_RADIUS)/10;
-			float distance_error = left_distance_reference - current_position.distance_travelled_left_wheel;
+			
+			current_position.absolute_distance_travelled_left_wheel = ((right_encoder.filtered_absolute_angular_position)/revolution*2*PI*WHEEL_RADIUS)/10;
+			current_position.relative_distance_travelled_left_wheel = ((left_encoder.filtered_relative_angular_position)/revolution*2*PI*WHEEL_RADIUS)/10;
+			
+			float distance_error = left_distance_reference - current_position.relative_distance_travelled_left_wheel;
 
 			if(left_distance_reference != 0 && distance_error != 0) {
 				current_frequency = motor_speed_control(distance_error, current_frequency, &leftPID);
+
 				timerAlarmEnable(left_stepper_timer); 
 
 				if (forward_flag && left_motor_enabled && right_motor_enabled) {
-					float driftError = current_position.distance_travelled_left_wheel - current_position.distance_travelled_right_wheel;
+					float driftError = 0 + x_y_position.theta;
 					float kP = KP;
 					if (driftError > 0) {
 						correction = driftError * kP;
 					}
 				}
-				else if (turn_flag && left_motor_enabled && right_motor_enabled) {
-					float driftError = -(current_position.distance_travelled_left_wheel + current_position.distance_travelled_right_wheel);
-					float kP = KP;
-					if (driftError > 0) {
-						correction = driftError * kP;
-					}
-				}
+				// else if (turn_flag && left_motor_enabled && right_motor_enabled) {
+				// 	float driftError = -(current_position.distance_travelled_left_wheel + current_position.distance_travelled_right_wheel);
+				// 	float kP = KP;
+				// 	if (driftError > 0) {
+				// 		correction = driftError * kP;
+				// 	}
+				//}
 				else {
 					correction = 0;
 				}
@@ -298,25 +317,25 @@ void left_motor_control_task(void *parameter) {
 
 				if(distance_error > 0 && abs(distance_error) > ACCEPTABLE_ERROR){
 					digitalWrite(DIR_PIN_LEFT, CLOCKWISE);
-					vTaskDelay(1 / portTICK_PERIOD_MS); 
+					//vTaskDelay(1 / portTICK_PERIOD_MS); 
 				}
 				else if (distance_error < 0 && abs(distance_error) > ACCEPTABLE_ERROR){
 					digitalWrite(DIR_PIN_LEFT, ANTI_CLOCKWISE);
-					vTaskDelay(1 / portTICK_PERIOD_MS);
+					//vTaskDelay(1 / portTICK_PERIOD_MS);
 				}
 				else {
 					timerAlarmDisable(left_stepper_timer);
-					left_distance_reference = 0;
+					//left_distance_reference = 0;
 					correction = 0;
-					//left_motor_enabled = false;
+					left_motor_enabled = false;
 					left_encoder.initialized = false;
 					left_motor_state = DONE;
-					vTaskDelay(100 / portTICK_PERIOD_MS); 
+					//vTaskDelay(100 / portTICK_PERIOD_MS); 
 				}
 			}
 			else {
 				timerAlarmDisable(left_stepper_timer);
-				vTaskDelay(10 / portTICK_PERIOD_MS);
+				//vTaskDelay(10 / portTICK_PERIOD_MS);
 			}	
 		}		
 		else {
@@ -325,9 +344,9 @@ void left_motor_control_task(void *parameter) {
 				forward_flag = false;
 			}
 			left_motor_state = IDLE;
-			vTaskDelay(10 / portTICK_PERIOD_MS); 
+			//vTaskDelay(10 / portTICK_PERIOD_MS); 
 		}
-
+		vTaskDelayUntil(&lastWakeTime, period);
 	}
 
 }
@@ -335,8 +354,7 @@ void left_motor_control_task(void *parameter) {
 float motor_speed_control(float error, float currentFreq, PIDController* pid) {
 
     unsigned long currentTime = millis();
-    float dt = (currentTime - pid->previousTime) / 1000.0;
-	if (dt <= 0.0f) dt = 0.001f;
+    float dt = DT_SEC;
     pid->previousTime = currentTime;
 
     error = abs(error);

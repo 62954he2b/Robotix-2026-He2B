@@ -1,9 +1,10 @@
 #include "motion_control.h"
 
 MotionState current_position {
-    .distance_travelled_left_wheel = 0, 
-    .distance_travelled_right_wheel = 0,
-    .robot_distance_travelled = 0,       
+    .relative_distance_travelled_left_wheel = 0, 
+    .relative_distance_travelled_right_wheel = 0,
+    .absolute_distance_travelled_left_wheel = 0,
+    .absolute_distance_travelled_right_wheel = 0,          
     .robot_orientation_deg = 0
 };
 

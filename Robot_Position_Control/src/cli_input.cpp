@@ -118,10 +118,7 @@ void command_handler(String command) {
 		Serial.println("Motor stopped!");
 	} 
 	else if (command == "status") {
-			Serial.print("current orientation : ");
-			Serial.print(current_position.robot_orientation_deg);
-			Serial.print("\tdistance travelled : ");
-			Serial.println(current_position.robot_distance_travelled);
+			Serial.printf("current position - x : %8.2f y : %8.2f theta : %8.2f", x_y_position.x, x_y_position.y, x_y_position.theta);
 	}
 	else {
 		Serial.print("❌ Unknown command");

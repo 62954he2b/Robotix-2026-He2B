@@ -11,7 +11,7 @@
 #define HSPI_MOSI 13
 #define HSPI_MISO 12
 #define HSPI_SCLK 14
-#define HSPI_CS   15
+#define HSPI_CS   35
 
 #define SPI_SLAVE_HOST HSPI
 

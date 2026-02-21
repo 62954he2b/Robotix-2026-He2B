@@ -50,8 +50,6 @@ EncoderAS5048 right_encoder {
 
 void left_encoder_reading_task(void *parameter) {
 
-    const TickType_t period = pdMS_TO_TICKS(1);
-    TickType_t lastWakeTime = xTaskGetTickCount();
     static float previousAngularPosition = 0;
     static bool initialized = false;
 
@@ -94,17 +92,13 @@ void left_encoder_reading_task(void *parameter) {
 
             previousAngularPosition = left_encoder.current_angular_position;
 
-            if (!left_encoder.initialized){
-                left_encoder.revolution_counter = 0;
-            }
-
             left_encoder.absolute_angular_position = left_encoder.current_angular_position + left_encoder.revolution_counter * 360.0f;
             filter_angle_value(&left_encoder);
 
             }
         }
         delay :
-            vTaskDelayUntil(&lastWakeTime, period);
+            vTaskDelay(10 / portTICK_PERIOD_MS);
     }
 }
 
@@ -117,7 +111,7 @@ void right_encoder_reading_task(void *parameter) {
 
     while(1){
 
-        if (!left_encoder.new_sample) {
+        if (!right_encoder.new_sample) {
             vTaskDelay(1);
             continue;
         }
@@ -154,11 +148,8 @@ void right_encoder_reading_task(void *parameter) {
 
             previousAngularPosition = right_encoder.current_angular_position;
 
-            if (!right_encoder.initialized){
-                right_encoder.revolution_counter = 0;
-            }
-
             right_encoder.absolute_angular_position = right_encoder.current_angular_position + right_encoder.revolution_counter * 360.0f;
+            
             filter_angle_value(&right_encoder);
             }
         }
@@ -213,6 +204,6 @@ void initialize_encoder(EncoderAS5048 *encoder) {
     encoder->median_index = 0;
     encoder->average_index = 0;
 
-    encoder->revolution_counter = 0;
+    //encoder->revolution_counter = 0;
     encoder->initialized = true;
 }
