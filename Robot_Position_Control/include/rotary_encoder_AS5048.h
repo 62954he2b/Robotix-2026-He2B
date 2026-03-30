@@ -10,8 +10,8 @@
 #define MEDIAN_SIZE 5
 #define AVG_SIZE 10
 
-#define WHEEL_RADIUS 22.50f //0.637 pour engrenage
-#define LENGTH_BETWEEN_ENCODERS_MM 180
+#define WHEEL_RADIUS_MM 22.50f
+#define WHEEL_BASE_MM 180.00f
 
 typedef struct {
     volatile uint32_t rise_time;
@@ -29,8 +29,13 @@ typedef struct {
     float absolute_angular_position;
     float current_angular_position;
     int revolution_counter;
+    float angular_velocity;
     float filtered_absolute_angular_position;
+    float previous_filtered_absolute_angular_position;
     float filtered_relative_angular_position;
+    float filtered_angular_velocity;
+    float previous_filtered_angular_velocity;
+    float filtered_linear_velocity;
 
     bool initialized;
     
@@ -39,7 +44,8 @@ typedef struct {
 extern EncoderAS5048 left_encoder;
 extern EncoderAS5048 right_encoder;
 
-extern portMUX_TYPE encoderMutex;
+extern portMUX_TYPE LeftEncoderMutex;
+extern portMUX_TYPE RightEncoderMutex;
 
 void initialize_encoder(EncoderAS5048 *encoder);
 void filter_angle_value(EncoderAS5048 *encoder);

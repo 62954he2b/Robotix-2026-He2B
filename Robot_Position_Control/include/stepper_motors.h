@@ -20,6 +20,8 @@
 #define MOSI 23
 
 #define R_SENSE  0.075f  // Valeur du sense resistor sur les drivers
+#define MICROSTEPS 4
+#define STEPS_PER_REV 200*MICROSTEPS
 
 extern hw_timer_t * left_stepper_timer;
 extern hw_timer_t * right_stepper_timer;

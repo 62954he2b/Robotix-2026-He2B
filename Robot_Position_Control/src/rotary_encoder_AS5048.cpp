@@ -1,8 +1,9 @@
 #include "rotary_encoder_AS5048.h"
 
-portMUX_TYPE encoderMutex = portMUX_INITIALIZER_UNLOCKED;
+portMUX_TYPE LeftEncoderMutex = portMUX_INITIALIZER_UNLOCKED;
+portMUX_TYPE RightEncoderMutex = portMUX_INITIALIZER_UNLOCKED;
 
- EncoderAS5048 left_encoder {
+EncoderAS5048 left_encoder {
     .rise_time = 0,
     .last_rise_time = 0,
     .high_time = 0,
@@ -11,7 +12,6 @@ portMUX_TYPE encoderMutex = portMUX_INITIALIZER_UNLOCKED;
 
     .median_buf = {0},
     .average_buf = {0}, 
-
     .median_index = 0,
     .average_index = 0,
 
@@ -19,8 +19,13 @@ portMUX_TYPE encoderMutex = portMUX_INITIALIZER_UNLOCKED;
     .absolute_angular_position = 0.0,
     .current_angular_position = 0.0,
     .revolution_counter = 0,
+    .angular_velocity = 0.0,
     .filtered_absolute_angular_position = 0.0,
+    .previous_filtered_absolute_angular_position = 0.0,
     .filtered_relative_angular_position = 0.0,
+    .filtered_angular_velocity = 0.0,
+    .previous_filtered_angular_velocity = 0.0,
+    .filtered_linear_velocity = 0.0,
 
     .initialized = false  
 };
@@ -34,7 +39,6 @@ EncoderAS5048 right_encoder {
 
     .median_buf = {0},
     .average_buf = {0}, 
-
     .median_index = 0,
     .average_index = 0,
 
@@ -42,16 +46,24 @@ EncoderAS5048 right_encoder {
     .absolute_angular_position = 0.0,
     .current_angular_position = 0.0,
     .revolution_counter = 0,
+    .angular_velocity = 0.0,
     .filtered_absolute_angular_position = 0.0,
+    .previous_filtered_absolute_angular_position = 0.0,
     .filtered_relative_angular_position = 0.0,
+    .filtered_angular_velocity = 0.0,
+    .previous_filtered_angular_velocity = 0.0,
+    .filtered_linear_velocity = 0.0,
 
     .initialized = false
 };
 
 void left_encoder_reading_task(void *parameter) {
 
-    static float previousAngularPosition = 0;
+    static float initialAngularPosition = 0.0;
+    static float previousAngularPosition = 0.0;
     static bool initialized = false;
+    static uint32_t current_time = 0;
+    static uint32_t previous_time = 0;
 
     while(1){
 
@@ -61,11 +73,11 @@ void left_encoder_reading_task(void *parameter) {
         }
 
         if (left_encoder.new_sample) {
-        portENTER_CRITICAL(&encoderMutex);
+        portENTER_CRITICAL(&LeftEncoderMutex);
         uint32_t h = left_encoder.high_time;
         uint32_t p = left_encoder.period_us;
         left_encoder.new_sample = false;
-        portEXIT_CRITICAL(&encoderMutex);
+        portEXIT_CRITICAL(&LeftEncoderMutex);
 
         if (p < 500 || p > 5000) goto delay;
         if (h > p) goto delay;
@@ -76,6 +88,7 @@ void left_encoder_reading_task(void *parameter) {
             left_encoder.current_angular_position = rawAngle;
 
             if (!initialized) {
+                    initialAngularPosition = rawAngle;
                     previousAngularPosition = rawAngle;
                     initialized = true;
                     goto delay;
@@ -92,9 +105,22 @@ void left_encoder_reading_task(void *parameter) {
 
             previousAngularPosition = left_encoder.current_angular_position;
 
-            left_encoder.absolute_angular_position = left_encoder.current_angular_position + left_encoder.revolution_counter * 360.0f;
+            left_encoder.absolute_angular_position = (left_encoder.current_angular_position + left_encoder.revolution_counter * 360.0f) - initialAngularPosition;
             filter_angle_value(&left_encoder);
 
+            current_time = micros();
+
+            float dt = (current_time - previous_time) / 1000000.0f;
+
+            if (dt > 1e-6f) {
+                left_encoder.filtered_angular_velocity = (((left_encoder.filtered_absolute_angular_position - left_encoder.previous_filtered_absolute_angular_position) / dt) * PI / 180);
+                left_encoder.filtered_linear_velocity = left_encoder.filtered_angular_velocity * WHEEL_RADIUS_MM / 1000;
+            }
+            
+            left_encoder.previous_filtered_absolute_angular_position = left_encoder.filtered_absolute_angular_position;
+            left_encoder.previous_filtered_angular_velocity = left_encoder.filtered_angular_velocity;
+
+            previous_time = current_time;
             }
         }
         delay :
@@ -104,10 +130,11 @@ void left_encoder_reading_task(void *parameter) {
 
 void right_encoder_reading_task(void *parameter) {
 
-    const TickType_t period = pdMS_TO_TICKS(1);
-    TickType_t lastWakeTime = xTaskGetTickCount();
+    static float initialAngularPosition = 0;
     static float previousAngularPosition = 0;
     static bool initialized = false;
+    static uint32_t current_time = 0;
+    static uint32_t previous_time = 0;
 
     while(1){
 
@@ -117,11 +144,11 @@ void right_encoder_reading_task(void *parameter) {
         }
 
         if (right_encoder.new_sample) {
-        portENTER_CRITICAL(&encoderMutex);
+        portENTER_CRITICAL(&RightEncoderMutex);
         uint32_t h = right_encoder.high_time;
         uint32_t p = right_encoder.period_us;
         right_encoder.new_sample = false;
-        portEXIT_CRITICAL(&encoderMutex);
+        portEXIT_CRITICAL(&RightEncoderMutex);
 
         if (p < 500 || p > 5000) goto delay;
         if (h > p) goto delay;
@@ -132,12 +159,12 @@ void right_encoder_reading_task(void *parameter) {
             right_encoder.current_angular_position = rawAngle;
 
             if (!initialized) {
+                    initialAngularPosition = rawAngle;
                     previousAngularPosition = rawAngle;
                     initialized = true;
                     goto delay;
             }
 
-            // Unwrap angle (continu)
             float delta = right_encoder.current_angular_position - previousAngularPosition;
             if (delta > 300.0f) {
                right_encoder.revolution_counter--;
@@ -148,13 +175,26 @@ void right_encoder_reading_task(void *parameter) {
 
             previousAngularPosition = right_encoder.current_angular_position;
 
-            right_encoder.absolute_angular_position = right_encoder.current_angular_position + right_encoder.revolution_counter * 360.0f;
-            
+            right_encoder.absolute_angular_position = -((right_encoder.current_angular_position + right_encoder.revolution_counter * 360.0f) - initialAngularPosition);
             filter_angle_value(&right_encoder);
+
+            current_time = micros();
+
+            float dt = (current_time - previous_time) / 1000000.0f;
+
+            if (dt > 1e-6f) {
+                right_encoder.filtered_angular_velocity = (((right_encoder.filtered_absolute_angular_position - right_encoder.previous_filtered_absolute_angular_position) / dt) * PI / 180);
+                right_encoder.filtered_linear_velocity = right_encoder.filtered_angular_velocity * WHEEL_RADIUS_MM / 1000;
+            }
+            
+            right_encoder.previous_filtered_absolute_angular_position = right_encoder.filtered_absolute_angular_position;
+            right_encoder.previous_filtered_angular_velocity = right_encoder.filtered_angular_velocity;
+
+            previous_time = current_time;
             }
         }
         delay :
-            vTaskDelayUntil(&lastWakeTime, period);
+            vTaskDelay(10 / portTICK_PERIOD_MS);
     }
 }
 
@@ -198,12 +238,9 @@ void filter_angle_value(EncoderAS5048 *encoder) {
 
 }
 
-
-
 void initialize_encoder(EncoderAS5048 *encoder) {
     encoder->median_index = 0;
     encoder->average_index = 0;
 
-    //encoder->revolution_counter = 0;
     encoder->initialized = true;
 }

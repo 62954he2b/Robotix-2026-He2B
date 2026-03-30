@@ -1,5 +1,5 @@
-#ifndef ACCESSPOINTESP_H
-#define ACCESSPOINTESP_H
+#ifndef ACCESS_POINT_H
+#define ACCESS_POINT_H
 
 #include <Arduino.h>
 #include <WiFi.h>

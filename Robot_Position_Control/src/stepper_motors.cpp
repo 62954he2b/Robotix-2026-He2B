@@ -12,7 +12,7 @@ void setupDriver(TMC5160Stepper &driver) {
   driver.begin();
   driver.toff(4); 
   driver.rms_current(1000); // en mA
-  driver.microsteps(4);
+  driver.microsteps(MICROSTEPS);
   driver.en_pwm_mode(false);
   driver.pwm_autoscale(true); // Auto courant
   driver.VSTART(10);

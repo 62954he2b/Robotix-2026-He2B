@@ -95,9 +95,9 @@ void stop_motion(){
 
 
 float angle_to_distance_converter(float angle) {
-    return ((LENGTH_BETWEEN_ENCODERS_MM/2) * angle/180.0f * PI) / 10;
+    return ((WHEEL_BASE_MM/2) * angle/180.0f * PI) / 10;
 }
 
 float pivot_angle_to_distance_converter(float angle) {
-    return ((LENGTH_BETWEEN_ENCODERS_MM) * angle/180.0f * PI) / 10;
+    return ((WHEEL_BASE_MM) * angle/180.0f * PI) / 10;
 }

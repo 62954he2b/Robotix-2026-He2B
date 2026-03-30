@@ -10,7 +10,7 @@ volatile bool rightStepState = false;
 
 // Fonctions d'interruption pour les canaux PWM de l'encodeur gauche
 void IRAM_ATTR leftEncoder_handleEdge() {
-	portENTER_CRITICAL_ISR(&encoderMutex);
+	portENTER_CRITICAL_ISR(&LeftEncoderMutex);
     uint32_t left_now = micros();
 
     if (digitalRead(LEFT_PWM_PIN) == HIGH) {
@@ -21,12 +21,12 @@ void IRAM_ATTR leftEncoder_handleEdge() {
         left_encoder.high_time = left_now - left_encoder.last_rise_time;
         left_encoder.new_sample = true;
     }
-	portEXIT_CRITICAL_ISR(&encoderMutex);
+	portEXIT_CRITICAL_ISR(&LeftEncoderMutex);
 }
 
 // Fonctions d'interruption pour les canaux PWM de l'encodeur gauche
 void IRAM_ATTR rightEncoder_handleEdge() {
-	portENTER_CRITICAL_ISR(&encoderMutex);
+	portENTER_CRITICAL_ISR(&RightEncoderMutex);
     uint32_t right_now = micros();
 
     if (digitalRead(RIGHT_PWM_PIN) == HIGH) {
@@ -37,7 +37,7 @@ void IRAM_ATTR rightEncoder_handleEdge() {
         right_encoder.high_time = right_now - right_encoder.last_rise_time;
         right_encoder.new_sample = true;
     }
-	portEXIT_CRITICAL_ISR(&encoderMutex);
+	portEXIT_CRITICAL_ISR(&RightEncoderMutex);
 }
 
 void IRAM_ATTR leftStepperISR() {
@@ -60,7 +60,7 @@ void setup()
 	SPI.begin();
 
 	// HSPI - COMMUNICATION WITH RPI
-	HSPIInitialisation();
+	HSPI_initialisation();
 
 	pinMode(EN_PIN_LEFT, OUTPUT);
 	digitalWrite(EN_PIN_LEFT, LOW);
@@ -104,56 +104,102 @@ void setup()
 	timerAlarmWrite(right_stepper_timer, 1000000 / maximum_frequency, true); // 400 µs = 2,5 kHz
 
 	// Démarrer les tâches sur les cœurs respectifs
-	//xTaskCreatePinnedToCore(azimuth_control_task, "AzimuthControl", 4096, NULL, 2, NULL, 0);
-	//xTaskCreatePinnedToCore(distance_control_task, "DistanceControl", 4096, NULL, 2, NULL, 0);
-	xTaskCreatePinnedToCore(right_motor_control_task, "RigMotorDistanceControl", 4096, NULL, 2, NULL, 1);
-	xTaskCreatePinnedToCore(left_motor_control_task, "LeftMotorDistanceControl", 4096, NULL, 2, NULL, 1);
+	xTaskCreatePinnedToCore(right_motor_velocity_control_task, "RigMotorDistanceControl", 4096, NULL, 2, NULL, 1);
+	xTaskCreatePinnedToCore(left_motor_velocity_control_task, "LeftMotorDistanceControl", 4096, NULL, 2, NULL, 1);
+	xTaskCreatePinnedToCore(right_motor_position_control_task, "RigMotorDistanceControl", 4096, NULL, 2, NULL, 1);
+	xTaskCreatePinnedToCore(left_motor_position_control_task, "LeftMotorDistanceControl", 4096, NULL, 2, NULL, 1);
 	xTaskCreatePinnedToCore(left_encoder_reading_task, "LeftEncoderRead", 4096, NULL, 2, NULL, 0);
 	xTaskCreatePinnedToCore(right_encoder_reading_task, "RightEncoderRead", 4096, NULL, 2, NULL, 0);
 	xTaskCreatePinnedToCore(read_serial_input_task, "SerialInputTask", 4096, NULL, 1, NULL, 0);
 	xTaskCreatePinnedToCore(read_wifi_input_task, "WifiInputTask", 4096, NULL, 1, NULL, 0);
-	xTaskCreatePinnedToCore(read_HSPI_input_task, "RPItoESP32Task", 4096, NULL, 1, NULL, 0);
+	xTaskCreatePinnedToCore(read_write_HSPI_task, "RPItoESP32Task", 4096, NULL, 1, NULL, 0);
 	xTaskCreatePinnedToCore(odometry_task, "Odometry", 4096, NULL, 1, NULL, 1);
 	//xTaskCreatePinnedToCore(imu_BNO080_read_task, "IMUReadTask", 4096, NULL, 1, NULL, 1);
 	}
 
 void loop()
-{
+{	
+	static bool cleared_screen = false;
 
-		Serial.printf(
-			"LEFT  | init:%8.2f° cur:%8.2f° abs:%8.2f° rel:%8.2f° ref:%8.2f dist:%8.2f  x : %8.2f  y : %8.2f theta = %8.2f\n",
-			left_encoder.initial_angular_position,
-			left_encoder.current_angular_position,
-			left_encoder.filtered_absolute_angular_position,
-			left_encoder.filtered_relative_angular_position,
-			left_distance_reference,
-			current_position.absolute_distance_travelled_left_wheel,
-			x_y_position.x,
-			x_y_position.y,
-			x_y_position.theta
-		);
+	if (motors_control_state == MANUAL) {
+		if(print_command){
+			if (!cleared_screen) {
+				Serial.print("\033[2J"); 
+				cleared_screen = true;
+			}
 
-		Serial.printf(
-			"RIGHT | init:%8.2f° cur:%8.2f° abs:%8.2f° rel:%8.2f° ref:%8.2f dist:%8.2f  x : %8.2f  y : %8.2f  theta = %8.2f\n",
-			right_encoder.initial_angular_position,
-			right_encoder.current_angular_position,
-			right_encoder.filtered_absolute_angular_position,
-			right_encoder.filtered_relative_angular_position,
-			right_distance_reference,
-			current_position.absolute_distance_travelled_right_wheel,
-			x_y_position.x,
-			x_y_position.y,
-			x_y_position.theta
-		);
+			Serial.print("\033[H");  // home
 
+			Serial.println("=========== ROBOT STATE ===========");
 
-		// Serial.printf("Odometry : x : %8.2f  y : %8.2f  theta = %8.2f\n",
-		// 		x_y_position.x,
-		// 		x_y_position.y,
-		// 		x_y_position.theta
-		// );
+			Serial.printf("POSITION   | X:%7.2f  Y:%7.2f  TH:%7.2f\n",
+				robot_state.x,
+				robot_state.y,
+				robot_state.theta
+			);
 
+			Serial.printf("VELOCITY   | LIN:%7.4f m/s  ANG:%7.4f rad/s\n",
+				robot_state.current_linear_velocity,
+				robot_state.current_angular_velocity
+			);
 
+			Serial.println("-----------------------------------");
+
+			Serial.println("LEFT WHEEL");
+			Serial.printf("ANG   | init    :%7.2f  cur :%7.2f  abs     :%7.2f  rel :%7.2f\n",
+				left_encoder.initial_angular_position,
+				left_encoder.current_angular_position,
+				left_encoder.filtered_absolute_angular_position,
+				left_encoder.filtered_relative_angular_position
+			);
+			Serial.printf("CTRL  | abs_dist:%7.2f  ref :%7.2f  rel_dist:%7.2f\n",
+				current_position.absolute_distance_travelled_left_wheel,
+				left_distance_reference,
+				current_position.relative_distance_travelled_left_wheel
+			);
+
+			Serial.println("-----------------------------------");
+
+			Serial.println("RIGHT WHEEL");
+			Serial.printf("ANG   | init    :%7.2f  cur :%7.2f  abs     :%7.2f  rel :%7.2f\n",
+				right_encoder.initial_angular_position,
+				right_encoder.current_angular_position,
+				right_encoder.filtered_absolute_angular_position,
+				right_encoder.filtered_relative_angular_position
+			);
+			Serial.printf("CTRL  | abs_dist:%7.2f  ref :%7.2f  rel_dist:%7.2f\n",
+				current_position.absolute_distance_travelled_right_wheel,
+				right_distance_reference,
+				current_position.relative_distance_travelled_right_wheel
+			);
+		}
+		else{
+			cleared_screen = false;
+		}
+
+	}
+	else if (motors_control_state == AUTOMATIC){
+
+		if(print_command){
+
+			if (!cleared_screen) {
+				Serial.print("\033[2J");
+				cleared_screen = true;
+			}
+
+			Serial.println("\033[H");
+			Serial.printf("current position - x : %8.2f y : %8.2f theta : %8.2f ang_vel : %8.2f °/s lin_vel : %8.2f m/s",
+				robot_state.x, 
+				robot_state.y, 
+				robot_state.theta, 
+				robot_state.current_angular_velocity, 
+				robot_state.current_linear_velocity
+			);
+		}
+		else{
+			cleared_screen = false;
+		}
+	}
 }
 
 
