@@ -33,6 +33,8 @@ typedef struct{
     bool emergency_stop;
 } DataFromPi;
 
+extern portMUX_TYPE HSPIMutex;
+
 void command_handler(String command);
 
 void read_serial_input_task(void *parameter);

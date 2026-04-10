@@ -17,7 +17,6 @@ typedef struct {
     float Kp, Ki, Kd;
     float integral;
     float previousError;
-    unsigned long previousTime;
 } PIDController;
 
 enum MotorState {

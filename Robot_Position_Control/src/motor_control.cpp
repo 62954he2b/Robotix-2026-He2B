@@ -2,8 +2,8 @@
 #include "rotary_encoder_AS5048.h"
 #include "odometry.h"
 
-#define MOTOR_PERIOD_MS 5
-#define DT_SEC 0.005f
+#define MOTOR_PERIOD_MS 5.0f
+#define DT_SEC (MOTOR_PERIOD_MS / 1000.0f)
 
 #define CLOCKWISE LOW
 #define ANTI_CLOCKWISE HIGH
@@ -11,14 +11,17 @@
 #define KP 200
 
 #define STOP_THRESHOLD 200
+#define FREQUENCY_UPDATE_THRESHOLD 1.0f
 
 const float minimum_frequency = 200;
 const float maximum_frequency = 4000;
 bool forward_flag = false;
 bool turn_flag = false;
 
-PIDController position_PID_coefficients = {500, 0.25, 0.1, 0, 0, 0};
-PIDController velocity_PID_coefficients = {2000, 0.25, 0.1, 0, 0, 0};
+PIDController left_position_PID_coefficients = {500, 0.25, 0.1, 0, 0};
+PIDController right_position_PID_coefficients = {500, 0.25, 0.1, 0, 0};
+PIDController left_velocity_PID_coefficients = {2000, 0.25, 0.1, 0, 0};
+PIDController right_velocity_PID_coefficients = {2000, 0.25, 0.1, 0, 0};
 
 volatile MotorState left_motor_state;
 volatile MotorState right_motor_state;
@@ -59,7 +62,7 @@ void right_motor_position_control_task(void *parameter) {
 				float distance_error = right_distance_reference - current_position.relative_distance_travelled_right_wheel;
 				
 				if(right_distance_reference != 0 && distance_error != 0) {
-					current_frequency = PID_control(distance_error, current_frequency, &position_PID_coefficients);
+					current_frequency = PID_control(distance_error, current_frequency, &right_position_PID_coefficients);
 					timerAlarmEnable(right_stepper_timer);
 
 					if (forward_flag && left_motor_enabled && right_motor_enabled) {
@@ -162,7 +165,7 @@ void left_motor_position_control_task(void *parameter) {
 				float distance_error = left_distance_reference - current_position.relative_distance_travelled_left_wheel;
 				
 				if(left_distance_reference != 0 && distance_error != 0) {
-					current_frequency = PID_control(distance_error, current_frequency, &position_PID_coefficients);
+					current_frequency = PID_control(distance_error, current_frequency, &left_position_PID_coefficients);
 
 					timerAlarmEnable(left_stepper_timer); 
 
@@ -233,14 +236,15 @@ void right_motor_velocity_control_task(void *parameter) {
 	
 	float current_frequency = maximum_frequency;
 	float previous_frequency = 0;
-	float correction = 0; 
 
 	while(true){
 		if (motors_control_state == AUTOMATIC) {
 
-			float right_velocity_reference = linear_velocity_reference + (angular_velocity_reference * (WHEEL_BASE_MM / 1000.0f) / 2.0f); // <--- Signe PLUS
-			float right_angular_velocity_reference  = right_velocity_reference  / ( WHEEL_RADIUS_MM / 1000.0f);
+			portENTER_CRITICAL(&HSPIMutex);
+			float right_velocity_reference = linear_velocity_reference + (angular_velocity_reference * ((WHEEL_BASE_MM / 1000.0f) / 2.0f));
+			portEXIT_CRITICAL(&HSPIMutex);
 
+			float right_angular_velocity_reference  = right_velocity_reference  / ( WHEEL_RADIUS_MM / 1000.0f);
 			current_frequency  = (right_angular_velocity_reference  / (2 * PI)) * STEPS_PER_REV;
 
 			portENTER_CRITICAL(&RightEncoderMutex);
@@ -250,29 +254,30 @@ void right_motor_velocity_control_task(void *parameter) {
 
 			float velocity_error = right_velocity_reference - right_current_velocity;
 			
-			current_frequency = PID_control(velocity_error, current_frequency, &velocity_PID_coefficients);
+			current_frequency = PID_control(velocity_error, current_frequency, &right_velocity_PID_coefficients);
 			current_frequency = constrain(current_frequency, -maximum_frequency, maximum_frequency);
 
-			if (fabs(current_frequency) < STOP_THRESHOLD) {
+			if (fabsf(current_frequency) < STOP_THRESHOLD) {
 				timerAlarmDisable(right_stepper_timer);
+				right_velocity_PID_coefficients.integral = 0.0f;
+				right_velocity_PID_coefficients.previousError = 0.0f;
 				vTaskDelayUntil(&lastWakeTime, period);
 				continue;
 			}
-			else {
-				if( current_frequency >= 0 ){ 
-					digitalWrite(DIR_PIN_RIGHT, CLOCKWISE);
-				}
-				else if ( current_frequency < 0 ){
-					digitalWrite(DIR_PIN_RIGHT, ANTI_CLOCKWISE);
-				}
 
-				timerAlarmEnable(right_stepper_timer);
-
-				if (previous_frequency != current_frequency) {
-					previous_frequency = current_frequency;
-					timerAlarmWrite(right_stepper_timer, 1000000.0f / fabs(current_frequency), true);
-				}	
+			if( current_frequency >= 0 ){ 
+				digitalWrite(DIR_PIN_RIGHT, CLOCKWISE);
 			}
+			else if ( current_frequency < 0 ){
+				digitalWrite(DIR_PIN_RIGHT, ANTI_CLOCKWISE);
+			}
+
+			timerAlarmEnable(right_stepper_timer);
+
+			if (fabsf(previous_frequency - current_frequency) > FREQUENCY_UPDATE_THRESHOLD) {
+				previous_frequency = current_frequency;
+				timerAlarmWrite(right_stepper_timer, 1000000.0f / fabsf(current_frequency), true);
+			}	
 
 			vTaskDelayUntil(&lastWakeTime, period);
 		}
@@ -289,12 +294,15 @@ void left_motor_velocity_control_task(void *parameter) {
 	
 	float current_frequency = maximum_frequency;
 	float previous_frequency = 0;
-	float correction = 0;
 
 	while(true){
+
 		if(motors_control_state == AUTOMATIC){
 
-			float left_velocity_reference  = linear_velocity_reference - (angular_velocity_reference * ( WHEEL_BASE_MM / 1000.0f) / 2.0f);
+			portENTER_CRITICAL(&HSPIMutex);
+			float left_velocity_reference  = linear_velocity_reference - (angular_velocity_reference * (( WHEEL_BASE_MM / 1000.0f) / 2.0f));
+			portEXIT_CRITICAL(&HSPIMutex);
+			
 			float left_angular_velocity_reference  = left_velocity_reference  / ( WHEEL_RADIUS_MM / 1000.0f);
 
 			current_frequency  = (left_angular_velocity_reference  / (2 * PI)) * STEPS_PER_REV;
@@ -306,30 +314,32 @@ void left_motor_velocity_control_task(void *parameter) {
 
 			float velocity_error = left_velocity_reference - left_current_velocity;
 			
-			current_frequency = PID_control(velocity_error, current_frequency, &velocity_PID_coefficients);
+			current_frequency = PID_control(velocity_error, current_frequency, &left_velocity_PID_coefficients);
 			current_frequency = constrain(current_frequency, -maximum_frequency, maximum_frequency);
 
-			if (fabs(current_frequency) < STOP_THRESHOLD) {
+			if (fabsf(current_frequency) < STOP_THRESHOLD) {
 				timerAlarmDisable(left_stepper_timer);
+				left_velocity_PID_coefficients.integral = 0.0f;
+				left_velocity_PID_coefficients.previousError = 0.0f;
 				vTaskDelayUntil(&lastWakeTime, period);
 				continue;
 			}
-			else {
-				if( current_frequency >= 0 ){ 
-					digitalWrite(DIR_PIN_LEFT, CLOCKWISE);
-				}
-				else if ( current_frequency < 0 ){
-					digitalWrite(DIR_PIN_LEFT, ANTI_CLOCKWISE);
-				}
-
-				timerAlarmEnable(left_stepper_timer);
-
-
-				if (previous_frequency != current_frequency) {
-					previous_frequency = current_frequency;
-					timerAlarmWrite(left_stepper_timer, 1000000.0f / fabs(current_frequency), true);
-				}	
+			
+			if( current_frequency >= 0 ){ 
+				digitalWrite(DIR_PIN_LEFT, CLOCKWISE);
 			}
+			else if ( current_frequency < 0 ){
+				digitalWrite(DIR_PIN_LEFT, ANTI_CLOCKWISE);
+			}
+
+			timerAlarmEnable(left_stepper_timer);
+
+
+			if (fabsf(previous_frequency - current_frequency) > FREQUENCY_UPDATE_THRESHOLD) {
+				previous_frequency = current_frequency;
+				timerAlarmWrite(left_stepper_timer, 1000000.0f / fabsf(current_frequency), true);
+			}	
+
 			
 			vTaskDelayUntil(&lastWakeTime, period);
 		}
@@ -341,19 +351,14 @@ void left_motor_velocity_control_task(void *parameter) {
 
 float PID_control(float error, float feedforward_frequency, PIDController* pid) {
 
-    unsigned long currentTime = millis();
     float dt = DT_SEC;
-    pid->previousTime = currentTime;
 
     if (motors_control_state == MANUAL) {
-        error = abs(error);
+        error = fabsf(error);
     }
     
     pid->integral += error * dt;
-    
-    // ANTI-WINDUP Security
-    pid->integral = constrain(pid->integral, -2000.0f, 2000.0f);
-
+    pid->integral = constrain(pid->integral, -2000.0f, 2000.0f); // ANTI-WINDUP Security
     float derivative = (error - pid->previousError) / dt;
     pid->previousError = error;
 

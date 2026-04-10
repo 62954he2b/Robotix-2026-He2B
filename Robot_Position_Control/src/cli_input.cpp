@@ -20,6 +20,8 @@ volatile bool left_motor_enabled = false;
 
 DataFromPi commands = {0.0, 0.0, false};
 
+portMUX_TYPE HSPIMutex = portMUX_INITIALIZER_UNLOCKED;
+
 void command_handler(String command) {
     command.trim();  
 	float val = 0;
@@ -236,8 +238,10 @@ void read_write_HSPI_task(void *parameter) {
 
     	memcpy(&commands, rx_buf, sizeof(DataFromPi));
 
+		portENTER_CRITICAL(&HSPIMutex);
 		angular_velocity_reference = commands.target_angular_velocity;
 		linear_velocity_reference = commands.target_linear_velocity;
+		portEXIT_CRITICAL(&HSPIMutex);
 		
 		if(commands.emergency_stop == true && previous_state != EMERGENCY_STOP){
 			buffer_state = motors_control_state;
