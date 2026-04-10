@@ -30,6 +30,7 @@ extern volatile bool left_motor_enabled;
 typedef struct{
     float target_linear_velocity;
     float target_angular_velocity;
+    bool emergency_stop;
 } DataFromPi;
 
 void command_handler(String command);

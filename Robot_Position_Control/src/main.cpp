@@ -104,17 +104,16 @@ void setup()
 	timerAlarmWrite(right_stepper_timer, 1000000 / maximum_frequency, true); // 400 µs = 2,5 kHz
 
 	// Démarrer les tâches sur les cœurs respectifs
-	xTaskCreatePinnedToCore(right_motor_velocity_control_task, "RigMotorDistanceControl", 4096, NULL, 2, NULL, 1);
-	xTaskCreatePinnedToCore(left_motor_velocity_control_task, "LeftMotorDistanceControl", 4096, NULL, 2, NULL, 1);
-	xTaskCreatePinnedToCore(right_motor_position_control_task, "RigMotorDistanceControl", 4096, NULL, 2, NULL, 1);
-	xTaskCreatePinnedToCore(left_motor_position_control_task, "LeftMotorDistanceControl", 4096, NULL, 2, NULL, 1);
-	xTaskCreatePinnedToCore(left_encoder_reading_task, "LeftEncoderRead", 4096, NULL, 2, NULL, 0);
-	xTaskCreatePinnedToCore(right_encoder_reading_task, "RightEncoderRead", 4096, NULL, 2, NULL, 0);
-	xTaskCreatePinnedToCore(read_serial_input_task, "SerialInputTask", 4096, NULL, 1, NULL, 0);
-	xTaskCreatePinnedToCore(read_wifi_input_task, "WifiInputTask", 4096, NULL, 1, NULL, 0);
-	xTaskCreatePinnedToCore(read_write_HSPI_task, "RPItoESP32Task", 4096, NULL, 1, NULL, 0);
-	xTaskCreatePinnedToCore(odometry_task, "Odometry", 4096, NULL, 1, NULL, 1);
-	//xTaskCreatePinnedToCore(imu_BNO080_read_task, "IMUReadTask", 4096, NULL, 1, NULL, 1);
+	xTaskCreatePinnedToCore(right_motor_velocity_control_task, "RigMotorVelocityControl", 4096, NULL, 1, NULL, 1);
+	xTaskCreatePinnedToCore(left_motor_velocity_control_task, "LeftMotorVelocityControl", 4096, NULL, 1, NULL, 1);
+	xTaskCreatePinnedToCore(right_motor_position_control_task, "RigMotorPositionControl", 4096, NULL, 1, NULL, 1);
+	xTaskCreatePinnedToCore(left_motor_position_control_task, "LeftMotorPositionControl", 4096, NULL, 1, NULL, 1);
+	xTaskCreatePinnedToCore(left_encoder_reading_task, "LeftEncoderRead", 4096, NULL, 2, NULL, 1);
+	xTaskCreatePinnedToCore(right_encoder_reading_task, "RightEncoderRead", 4096, NULL, 2, NULL, 1);
+	xTaskCreatePinnedToCore(read_serial_input_task, "SerialInputTask", 4096, NULL, 2, NULL, 0);
+	xTaskCreatePinnedToCore(read_wifi_input_task, "WifiInputTask", 4096, NULL, 2, NULL, 0);
+	xTaskCreatePinnedToCore(read_write_HSPI_task, "RPItoESP32Task", 4096, NULL, 2, NULL, 0);
+	xTaskCreatePinnedToCore(odometry_task, "Odometry", 4096, NULL, 1, NULL, 0);
 	}
 
 void loop()
@@ -138,8 +137,12 @@ void loop()
 				robot_state.theta
 			);
 
-			Serial.printf("VELOCITY   | LIN:%7.4f m/s  ANG:%7.4f rad/s\n",
-				robot_state.current_linear_velocity,
+			Serial.printf("VELOCITY   | LINEAR - REF: %7.4f  CUR: %7.4f m/s\n",
+				linear_velocity_reference,
+				robot_state.current_linear_velocity
+			);
+			Serial.printf("VELOCITY   | ANGULAR - REF: %7.4f  CUR: %7.4f  rad/s\n",
+				angular_velocity_reference,
 				robot_state.current_angular_velocity
 			);
 
@@ -188,18 +191,29 @@ void loop()
 			}
 
 			Serial.println("\033[H");
-			Serial.printf("current position - x : %8.2f y : %8.2f theta : %8.2f ang_vel : %8.2f °/s lin_vel : %8.2f m/s",
+			Serial.printf("current position - x : %8.2f y : %8.2f theta : %8.2f ang_vel : %8.5f °/s lin_vel : %8.5f m/s",
 				robot_state.x, 
 				robot_state.y, 
 				robot_state.theta, 
-				robot_state.current_angular_velocity, 
-				robot_state.current_linear_velocity
+				angular_velocity_reference,
+				linear_velocity_reference
 			);
 		}
 		else{
 			cleared_screen = false;
 		}
 	}
+	else if (motors_control_state == EMERGENCY_STOP){
+
+		if (!cleared_screen) {
+				Serial.print("\033[2J");
+				cleared_screen = true;
+			}
+
+			Serial.println("\033[H");
+			Serial.println("EMERGENCY STOP");
+	}
+
 }
 
 

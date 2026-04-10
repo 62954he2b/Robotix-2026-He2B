@@ -18,7 +18,7 @@ bool print_command = false;
 volatile bool right_motor_enabled = false;
 volatile bool left_motor_enabled = false;
 
-DataFromPi commands;
+DataFromPi commands = {0.0, 0.0, false};
 
 void command_handler(String command) {
     command.trim();  
@@ -226,15 +226,30 @@ void read_write_HSPI_task(void *parameter) {
 	uint8_t tx_buf[BUFFER_SIZE] {0};
 	uint8_t rx_buf[BUFFER_SIZE] {0};
 
+	ControlState previous_state = NONE;
+	ControlState buffer_state = NONE;
+
     while (1) {
     	memcpy(tx_buf, &robot_state, sizeof(Odometry_t));
 
-    	//SPI COMMUNICATION
     	HSPI_queue(tx_buf, rx_buf, BUFFER_SIZE);
 
     	memcpy(&commands, rx_buf, sizeof(DataFromPi));
+
 		angular_velocity_reference = commands.target_angular_velocity;
 		linear_velocity_reference = commands.target_linear_velocity;
+		
+		if(commands.emergency_stop == true && previous_state != EMERGENCY_STOP){
+			buffer_state = motors_control_state;
+			motors_control_state = EMERGENCY_STOP;
+			previous_state = motors_control_state;
+		}
+		if (commands.emergency_stop == false && previous_state == EMERGENCY_STOP){
+			motors_control_state = buffer_state;
+			previous_state = motors_control_state;
+		}
+
+		vTaskDelay(10 / portTICK_PERIOD_MS);
     }
 }
 

@@ -37,8 +37,12 @@ void odometry_update(Odometry_t *odom, float delta_left, float delta_right, floa
     float delta_theta = (delta_right - delta_left) / wheel_base;
 
     float theta_mid = odom->theta + delta_theta / 2.0f;  //Odometrie point milieu
-    odom->x += delta_s * (-sinf(theta_mid));
-    odom->y += delta_s * ( cosf(theta_mid));
+    odom->x += delta_s * ( cosf(theta_mid));
+    odom->y += delta_s * ( sinf(theta_mid));
+
+    // //Odométrie classique
+    // odom->x += delta_s * (cosf(odom->theta));
+    // odom->y += delta_s * (sinf(odom->theta));
 
     odom->theta += delta_theta;
 
@@ -48,7 +52,5 @@ void odometry_update(Odometry_t *odom, float delta_left, float delta_right, floa
     odom->current_angular_velocity = (right_encoder.filtered_linear_velocity - left_encoder.filtered_linear_velocity) / wheel_base;
     odom->current_linear_velocity = (left_encoder.filtered_linear_velocity + right_encoder.filtered_linear_velocity) / 2.0f;
 
-    // //Odométrie classique
-    // odom->x += delta_s * (-sinf(odom->theta));
-    // odom->y += delta_s * (cosf(odom->theta));
+
 }

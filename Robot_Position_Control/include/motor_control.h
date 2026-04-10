@@ -28,7 +28,9 @@ enum MotorState {
 
 enum ControlState {
     MANUAL,
-    AUTOMATIC
+    AUTOMATIC,
+    EMERGENCY_STOP,
+    NONE
 };
 
 extern volatile MotorState left_motor_state;
@@ -40,7 +42,7 @@ void right_motor_position_control_task(void *parameter);
 void left_motor_position_control_task(void *parameter);
 void right_motor_velocity_control_task(void *parameter);
 void left_motor_velocity_control_task(void *parameter);
-float motor_speed_control(float error, float currentFreq, PIDController* pid);
+float position_PID_control(float error, float currentFreq, PIDController* pid);
 float motor_rotation_speed_control(float error, float currentFreq);
 
 #endif

@@ -10,20 +10,20 @@
 #define ACCEPTABLE_ERROR 0.1
 #define KP 200
 
-#define STOP_THRESHOLD 400
+#define STOP_THRESHOLD 10
 
 const float minimum_frequency = 200;
 const float maximum_frequency = 4000;
 bool forward_flag = false;
 bool turn_flag = false;
 
-PIDController leftPID = {500, 0.25, 0.1, 0, 0, 0};
-PIDController rightPID = {500, 0.25, 0.1, 0, 0, 0};
+PIDController position_PID_coefficients = {500, 0.25, 0.1, 0, 0, 0};
+PIDController velocity_PID_coefficients = {2000, 0.25, 0.1, 0, 0, 0};
 
 volatile MotorState left_motor_state;
 volatile MotorState right_motor_state;
 
-volatile ControlState motors_control_state = AUTOMATIC;
+volatile ControlState motors_control_state = NONE;
 
 void right_motor_position_control_task(void *parameter) {
 
@@ -38,18 +38,18 @@ void right_motor_position_control_task(void *parameter) {
 	while(true){
 		if (motors_control_state == MANUAL) {
 
-			if (!right_encoder.initialized) {
-				initialize_encoder(&right_encoder);
-				right_encoder.initial_angular_position = right_encoder.current_angular_position;
-				last_absolute_angular_position = right_encoder.filtered_absolute_angular_position;
-				right_motor_state = RUNNING;
-			}
-
 			portENTER_CRITICAL(&RightEncoderMutex);
 			current_position.absolute_distance_travelled_right_wheel = ((right_encoder.filtered_absolute_angular_position)/revolution*2*PI*WHEEL_RADIUS_MM)/10;
 			portEXIT_CRITICAL(&RightEncoderMutex);
 				
 			if (right_motor_enabled == true) {
+
+				if (!right_encoder.initialized) {
+					initialize_encoder(&right_encoder);
+					right_encoder.initial_angular_position = right_encoder.current_angular_position;
+					last_absolute_angular_position = right_encoder.filtered_absolute_angular_position;
+					right_motor_state = RUNNING;
+				}
 
 				portENTER_CRITICAL(&RightEncoderMutex);
 				right_encoder.filtered_relative_angular_position = (right_encoder.filtered_absolute_angular_position - last_absolute_angular_position);
@@ -59,7 +59,7 @@ void right_motor_position_control_task(void *parameter) {
 				float distance_error = right_distance_reference - current_position.relative_distance_travelled_right_wheel;
 				
 				if(right_distance_reference != 0 && distance_error != 0) {
-					current_frequency = motor_speed_control(distance_error, current_frequency, &rightPID);
+					current_frequency = PID_control(distance_error, current_frequency, &position_PID_coefficients);
 					timerAlarmEnable(right_stepper_timer);
 
 					if (forward_flag && left_motor_enabled && right_motor_enabled) {
@@ -141,18 +141,18 @@ void left_motor_position_control_task(void *parameter) {
 	while(true){
 		if (motors_control_state == MANUAL) {	
 
-			if (!left_encoder.initialized) {
-				initialize_encoder(&left_encoder);
-				left_encoder.initial_angular_position = left_encoder.current_angular_position;
-				last_absolute_angular_position = left_encoder.filtered_absolute_angular_position;
-				left_motor_state = RUNNING;
-			}
-
 			portENTER_CRITICAL(&LeftEncoderMutex);
 			current_position.absolute_distance_travelled_left_wheel = ((left_encoder.filtered_absolute_angular_position)/revolution*2*PI*WHEEL_RADIUS_MM)/10;
 			portEXIT_CRITICAL(&LeftEncoderMutex);
 
 			if (left_motor_enabled == true) {
+
+				if (!left_encoder.initialized) {
+					initialize_encoder(&left_encoder);
+					left_encoder.initial_angular_position = left_encoder.current_angular_position;
+					last_absolute_angular_position = left_encoder.filtered_absolute_angular_position;
+					left_motor_state = RUNNING;
+				}
 
 				portENTER_CRITICAL(&LeftEncoderMutex);
 				left_encoder.filtered_relative_angular_position = (left_encoder.filtered_absolute_angular_position - last_absolute_angular_position);// - left_encoder.initial_angular_position;
@@ -162,7 +162,7 @@ void left_motor_position_control_task(void *parameter) {
 				float distance_error = left_distance_reference - current_position.relative_distance_travelled_left_wheel;
 				
 				if(left_distance_reference != 0 && distance_error != 0) {
-					current_frequency = motor_speed_control(distance_error, current_frequency, &leftPID);
+					current_frequency = PID_control(distance_error, current_frequency, &position_PID_coefficients);
 
 					timerAlarmEnable(left_stepper_timer); 
 
@@ -233,7 +233,7 @@ void right_motor_velocity_control_task(void *parameter) {
 	
 	float current_frequency = maximum_frequency;
 	float previous_frequency = 0;
-	float correction = 0;
+	float correction = 0; 
 
 	while(true){
 		if (motors_control_state == AUTOMATIC) {
@@ -244,13 +244,13 @@ void right_motor_velocity_control_task(void *parameter) {
 			current_frequency  = (right_angular_velocity_reference  / (2 * PI)) * STEPS_PER_REV;
 
 			portENTER_CRITICAL(&RightEncoderMutex);
-			current_position.absolute_distance_travelled_left_wheel = ((right_encoder.filtered_absolute_angular_position)/revolution*2*PI*WHEEL_RADIUS_MM) / 10;
+			current_position.absolute_distance_travelled_right_wheel = ((right_encoder.filtered_absolute_angular_position)/revolution*2*PI*WHEEL_RADIUS_MM) / 10;
 			float right_current_velocity = right_encoder.filtered_linear_velocity;
 			portEXIT_CRITICAL(&RightEncoderMutex);
 
 			float velocity_error = right_velocity_reference - right_current_velocity;
 			
-			current_frequency = motor_speed_control(velocity_error, current_frequency, &rightPID);
+			current_frequency = PID_control(velocity_error, current_frequency, &velocity_PID_coefficients);
 			current_frequency = constrain(current_frequency, -maximum_frequency, maximum_frequency);
 
 			if (fabs(current_frequency) < STOP_THRESHOLD) {
@@ -306,7 +306,7 @@ void left_motor_velocity_control_task(void *parameter) {
 
 			float velocity_error = left_velocity_reference - left_current_velocity;
 			
-			current_frequency = motor_speed_control(velocity_error, current_frequency, &leftPID);
+			current_frequency = PID_control(velocity_error, current_frequency, &velocity_PID_coefficients);
 			current_frequency = constrain(current_frequency, -maximum_frequency, maximum_frequency);
 
 			if (fabs(current_frequency) < STOP_THRESHOLD) {
@@ -324,6 +324,7 @@ void left_motor_velocity_control_task(void *parameter) {
 
 				timerAlarmEnable(left_stepper_timer);
 
+
 				if (previous_frequency != current_frequency) {
 					previous_frequency = current_frequency;
 					timerAlarmWrite(left_stepper_timer, 1000000 / fabs(current_frequency), true);
@@ -338,13 +339,15 @@ void left_motor_velocity_control_task(void *parameter) {
 	}
 }
 
-float motor_speed_control(float error, float currentFreq, PIDController* pid) {
+float PID_control(float error, float currentFreq, PIDController* pid) {
 
     unsigned long currentTime = millis();
     float dt = DT_SEC;
     pid->previousTime = currentTime;
 
-    error = abs(error);
+	if (motors_control_state == MANUAL) {
+		error = abs(error);
+	}
     pid->integral += error * dt;
     float derivative = (error - pid->previousError) / dt;
     pid->previousError = error;
@@ -352,31 +355,4 @@ float motor_speed_control(float error, float currentFreq, PIDController* pid) {
     currentFreq = pid->Kp * error + pid->Ki * pid->integral + pid->Kd * derivative;
 
     return currentFreq;
-}
-
-float motor_rotation_speed_control(float error, float currentFreq) {	
-		
-		float Kp = 100.0;
-		float Ki = 0.25;
-		float Kd = 0.1;
-
-		static unsigned long previousTime = 0;
-		static float integral = 0;
-		static float previousError = 0;
-		float derivative = 0;
-
-		unsigned long currentTime = millis();
-		float dt = (currentTime - previousTime) / 1000.0;
-		previousTime = currentTime;
-
-		error = abs(error);
-		integral += error * dt;
-		derivative = (error - previousError) / dt;
-		previousError = error;
-
-		currentFreq = Kp * error + Ki * integral + Kd * derivative;
-		currentFreq = constrain(currentFreq, minimum_frequency, maximum_frequency);
-
-		return currentFreq;
-
 }

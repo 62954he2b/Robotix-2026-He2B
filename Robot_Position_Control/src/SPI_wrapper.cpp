@@ -31,6 +31,5 @@ void HSPI_queue(uint8_t* tx_data, uint8_t* rx_data, size_t len) {
     t.tx_buffer = tx_data;
     t.rx_buffer = rx_data;
 
-    // Envoie la transaction et attend qu'elle soit terminée
     spi_slave_transmit(HSPI_HOST, &t, portMAX_DELAY);
 }
