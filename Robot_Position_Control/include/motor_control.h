@@ -42,7 +42,7 @@ void right_motor_position_control_task(void *parameter);
 void left_motor_position_control_task(void *parameter);
 void right_motor_velocity_control_task(void *parameter);
 void left_motor_velocity_control_task(void *parameter);
-float PID_control(float error, float currentFreq, PIDController* pid);
+float PID_control(float error, float feedforward_frequency, PIDController* pid);
 
 #endif
 

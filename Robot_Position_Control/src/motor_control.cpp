@@ -10,7 +10,7 @@
 #define ACCEPTABLE_ERROR 0.1
 #define KP 200
 
-#define STOP_THRESHOLD 10
+#define STOP_THRESHOLD 200
 
 const float minimum_frequency = 200;
 const float maximum_frequency = 4000;
@@ -23,7 +23,7 @@ PIDController velocity_PID_coefficients = {2000, 0.25, 0.1, 0, 0, 0};
 volatile MotorState left_motor_state;
 volatile MotorState right_motor_state;
 
-volatile ControlState motors_control_state = NONE;
+volatile ControlState motors_control_state = AUTOMATIC;
 
 void right_motor_position_control_task(void *parameter) {
 
@@ -86,7 +86,7 @@ void right_motor_position_control_task(void *parameter) {
 
 					if (previous_frequency != corrected_frequency) {
 						previous_frequency = corrected_frequency;
-						timerAlarmWrite(right_stepper_timer, 1000000 / corrected_frequency, true);
+						timerAlarmWrite(right_stepper_timer, 1000000.0f / corrected_frequency, true);
 					}
 					
 					if(distance_error > 0 && abs(distance_error) > ACCEPTABLE_ERROR){
@@ -189,7 +189,7 @@ void left_motor_position_control_task(void *parameter) {
 
 					if (previous_frequency != corrected_frequency) {
 						previous_frequency = corrected_frequency;
-						timerAlarmWrite(left_stepper_timer, 1000000 / corrected_frequency, true);
+						timerAlarmWrite(left_stepper_timer, 10000000.0f / corrected_frequency, true);
 					}	
 
 					if(distance_error > 0 && abs(distance_error) > ACCEPTABLE_ERROR){
@@ -238,8 +238,8 @@ void right_motor_velocity_control_task(void *parameter) {
 	while(true){
 		if (motors_control_state == AUTOMATIC) {
 
-			float right_velocity_reference = linear_velocity_reference + (angular_velocity_reference * (WHEEL_BASE_MM / 1000.0) / 2.0); // <--- Signe PLUS
-			float right_angular_velocity_reference  = right_velocity_reference  / ( WHEEL_RADIUS_MM / 1000);
+			float right_velocity_reference = linear_velocity_reference + (angular_velocity_reference * (WHEEL_BASE_MM / 1000.0f) / 2.0f); // <--- Signe PLUS
+			float right_angular_velocity_reference  = right_velocity_reference  / ( WHEEL_RADIUS_MM / 1000.0f);
 
 			current_frequency  = (right_angular_velocity_reference  / (2 * PI)) * STEPS_PER_REV;
 
@@ -270,7 +270,7 @@ void right_motor_velocity_control_task(void *parameter) {
 
 				if (previous_frequency != current_frequency) {
 					previous_frequency = current_frequency;
-					timerAlarmWrite(right_stepper_timer, 1000000 / fabs(current_frequency), true);
+					timerAlarmWrite(right_stepper_timer, 1000000.0f / fabs(current_frequency), true);
 				}	
 			}
 
@@ -294,8 +294,8 @@ void left_motor_velocity_control_task(void *parameter) {
 	while(true){
 		if(motors_control_state == AUTOMATIC){
 
-			float left_velocity_reference  = linear_velocity_reference - (angular_velocity_reference * ( WHEEL_BASE_MM / 1000) / 2.0);
-			float left_angular_velocity_reference  = left_velocity_reference  / ( WHEEL_RADIUS_MM / 1000);
+			float left_velocity_reference  = linear_velocity_reference - (angular_velocity_reference * ( WHEEL_BASE_MM / 1000.0f) / 2.0f);
+			float left_angular_velocity_reference  = left_velocity_reference  / ( WHEEL_RADIUS_MM / 1000.0f);
 
 			current_frequency  = (left_angular_velocity_reference  / (2 * PI)) * STEPS_PER_REV;
 
@@ -327,7 +327,7 @@ void left_motor_velocity_control_task(void *parameter) {
 
 				if (previous_frequency != current_frequency) {
 					previous_frequency = current_frequency;
-					timerAlarmWrite(left_stepper_timer, 1000000 / fabs(current_frequency), true);
+					timerAlarmWrite(left_stepper_timer, 1000000.0f / fabs(current_frequency), true);
 				}	
 			}
 			
@@ -339,7 +339,7 @@ void left_motor_velocity_control_task(void *parameter) {
 	}
 }
 
-float PID_control(float error, float feedForwardFreq, PIDController* pid) {
+float PID_control(float error, float feedforward_frequency, PIDController* pid) {
 
     unsigned long currentTime = millis();
     float dt = DT_SEC;
@@ -351,18 +351,15 @@ float PID_control(float error, float feedForwardFreq, PIDController* pid) {
     
     pid->integral += error * dt;
     
-    // SÉCURITÉ ANTI-WINDUP (Très important pour la vitesse)
-    // Évite que le robot n'accélère à l'infini s'il est bloqué contre un mur
-    pid->integral = constrain(pid->integral, -2000.0, 2000.0);
+    // ANTI-WINDUP Security
+    pid->integral = constrain(pid->integral, -2000.0f, 2000.0f);
 
     float derivative = (error - pid->previousError) / dt;
     pid->previousError = error;
 
-    // 1. On calcule juste l'ajustement (ex: +50 Hz parce qu'il y a un frottement)
     float pid_correction = pid->Kp * error + pid->Ki * pid->integral + pid->Kd * derivative;
 
-    // 2. LA MAGIE : On ajoute cet ajustement à la vitesse idéale (Feed-Forward)
-    float finalFreq = feedForwardFreq + pid_correction;
+    float corrected_frequency = feedforward_frequency + pid_correction;
 
-    return finalFreq;
+    return corrected_frequency;
 }
