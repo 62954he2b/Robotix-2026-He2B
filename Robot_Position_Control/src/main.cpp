@@ -114,7 +114,9 @@ void setup()
 	xTaskCreatePinnedToCore(read_wifi_input_task, "WifiInputTask", 4096, NULL, 2, NULL, 0);
 	xTaskCreatePinnedToCore(read_write_HSPI_task, "RPItoESP32Task", 4096, NULL, 2, NULL, 0);
 	xTaskCreatePinnedToCore(odometry_task, "Odometry", 4096, NULL, 1, NULL, 0);
-	}
+	
+	motors_control_state = AUTOMATIC; 
+}
 
 void loop()
 {	

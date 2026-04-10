@@ -238,7 +238,7 @@ void right_motor_velocity_control_task(void *parameter) {
 	while(true){
 		if (motors_control_state == AUTOMATIC) {
 
-			float right_velocity_reference  = linear_velocity_reference - (angular_velocity_reference * ( WHEEL_BASE_MM / 1000) / 2.0);
+			float right_velocity_reference = linear_velocity_reference + (angular_velocity_reference * (WHEEL_BASE_MM / 1000.0) / 2.0); // <--- Signe PLUS
 			float right_angular_velocity_reference  = right_velocity_reference  / ( WHEEL_RADIUS_MM / 1000);
 
 			current_frequency  = (right_angular_velocity_reference  / (2 * PI)) * STEPS_PER_REV;
@@ -339,20 +339,30 @@ void left_motor_velocity_control_task(void *parameter) {
 	}
 }
 
-float PID_control(float error, float currentFreq, PIDController* pid) {
+float PID_control(float error, float feedForwardFreq, PIDController* pid) {
 
     unsigned long currentTime = millis();
     float dt = DT_SEC;
     pid->previousTime = currentTime;
 
-	if (motors_control_state == MANUAL) {
-		error = abs(error);
-	}
+    if (motors_control_state == MANUAL) {
+        error = abs(error);
+    }
+    
     pid->integral += error * dt;
+    
+    // SÉCURITÉ ANTI-WINDUP (Très important pour la vitesse)
+    // Évite que le robot n'accélère à l'infini s'il est bloqué contre un mur
+    pid->integral = constrain(pid->integral, -2000.0, 2000.0);
+
     float derivative = (error - pid->previousError) / dt;
     pid->previousError = error;
 
-    currentFreq = pid->Kp * error + pid->Ki * pid->integral + pid->Kd * derivative;
+    // 1. On calcule juste l'ajustement (ex: +50 Hz parce qu'il y a un frottement)
+    float pid_correction = pid->Kp * error + pid->Ki * pid->integral + pid->Kd * derivative;
 
-    return currentFreq;
+    // 2. LA MAGIE : On ajoute cet ajustement à la vitesse idéale (Feed-Forward)
+    float finalFreq = feedForwardFreq + pid_correction;
+
+    return finalFreq;
 }
