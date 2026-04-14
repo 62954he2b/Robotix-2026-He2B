@@ -10,10 +10,10 @@
 #define ACCEPTABLE_ERROR 0.1
 #define KP 200
 
-#define STOP_THRESHOLD 200
+#define STOP_THRESHOLD 5.0f
 #define FREQUENCY_UPDATE_THRESHOLD 1.0f
 
-const float minimum_frequency = 200;
+const float minimum_frequency = 0;
 const float maximum_frequency = 4000;
 bool forward_flag = false;
 bool turn_flag = false;
