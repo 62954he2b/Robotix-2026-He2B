@@ -2,7 +2,7 @@
 #include "rotary_encoder_AS5048.h"
 #include "odometry.h"
 
-#define MOTOR_PERIOD_MS 5.0f
+#define MOTOR_PERIOD_MS 1.0f
 #define DT_SEC (MOTOR_PERIOD_MS / 1000.0f)
 
 #define CLOCKWISE LOW
@@ -13,7 +13,7 @@
 #define STOP_THRESHOLD 5.0f
 #define FREQUENCY_UPDATE_THRESHOLD 1.0f
 
-const float minimum_frequency = 0;
+const float minimum_frequency = 200;
 const float maximum_frequency = 4000;
 bool forward_flag = false;
 bool turn_flag = false;

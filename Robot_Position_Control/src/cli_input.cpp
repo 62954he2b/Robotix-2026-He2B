@@ -18,7 +18,7 @@ bool print_command = false;
 volatile bool right_motor_enabled = false;
 volatile bool left_motor_enabled = false;
 
-DataFromPi commands = {0.0, 0.0, false};
+DataFromPi commands = {0.0f, 0.0f, 0.0f};
 
 portMUX_TYPE HSPIMutex = portMUX_INITIALIZER_UNLOCKED;
 
@@ -243,12 +243,12 @@ void read_write_HSPI_task(void *parameter) {
 		linear_velocity_reference = commands.target_linear_velocity;
 		portEXIT_CRITICAL(&HSPIMutex);
 		
-		if(commands.emergency_stop == true && previous_state != EMERGENCY_STOP){
+		if(commands.emergency_stop > 0.5f && previous_state != EMERGENCY_STOP){
 			buffer_state = motors_control_state;
 			motors_control_state = EMERGENCY_STOP;
 			previous_state = motors_control_state;
 		}
-		if (commands.emergency_stop == false && previous_state == EMERGENCY_STOP){
+		if (commands.emergency_stop <= 0.5f && previous_state == EMERGENCY_STOP){
 			motors_control_state = buffer_state;
 			previous_state = motors_control_state;
 		}

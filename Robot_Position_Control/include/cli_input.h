@@ -30,7 +30,7 @@ extern volatile bool left_motor_enabled;
 typedef struct{
     float target_linear_velocity;
     float target_angular_velocity;
-    bool emergency_stop;
+    float emergency_stop;
 } DataFromPi;
 
 extern portMUX_TYPE HSPIMutex;
