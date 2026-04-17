@@ -7,6 +7,8 @@
 #define LEFT_PWM_PIN 25
 #define RIGHT_PWM_PIN 26
 
+#define DELTA_MAX_ALLOWED 60
+
 #define MEDIAN_SIZE 5
 #define AVG_SIZE 10
 
@@ -18,7 +20,7 @@ typedef struct {
     volatile uint32_t last_rise_time;
     volatile uint32_t high_time;
     volatile uint32_t period_us;
-    volatile bool new_sample;
+    volatile bool sampled;
 
     float median_buf[MEDIAN_SIZE];
     float average_buf[AVG_SIZE]; 
@@ -36,6 +38,7 @@ typedef struct {
     float filtered_angular_velocity;
     float previous_filtered_angular_velocity;
     float filtered_linear_velocity;
+    float velocity_reference;
 
     bool initialized;
     

@@ -19,7 +19,7 @@ void IRAM_ATTR leftEncoder_handleEdge() {
 
     } else {
         left_encoder.high_time = left_now - left_encoder.last_rise_time;
-        left_encoder.new_sample = true;
+        left_encoder.sampled = true;
     }
 	portEXIT_CRITICAL_ISR(&LeftEncoderMutex);
 }
@@ -35,7 +35,7 @@ void IRAM_ATTR rightEncoder_handleEdge() {
 
     } else {
         right_encoder.high_time = right_now - right_encoder.last_rise_time;
-        right_encoder.new_sample = true;
+        right_encoder.sampled = true;
     }
 	portEXIT_CRITICAL_ISR(&RightEncoderMutex);
 }
@@ -54,7 +54,7 @@ void setup()
 {
 	Serial.begin(115200);
 	initiate_access_point(ssid, password);
-	//initiate_BNO080(); 
+
 
 	// VSPI - DRIVERS STEPPER MOTORS
 	SPI.begin();
@@ -103,6 +103,8 @@ void setup()
 	timerAttachInterrupt(right_stepper_timer, &rightStepperISR, true);
 	timerAlarmWrite(right_stepper_timer, 1000000 / maximum_frequency, true); // 400 µs = 2,5 kHz
 
+	delay(2000);
+
 	// Démarrer les tâches sur les cœurs respectifs
 	xTaskCreatePinnedToCore(right_motor_velocity_control_task, "RigMotorVelocityControl", 4096, NULL, 1, NULL, 1);
 	xTaskCreatePinnedToCore(left_motor_velocity_control_task, "LeftMotorVelocityControl", 4096, NULL, 1, NULL, 1);
@@ -150,11 +152,13 @@ void loop()
 			Serial.println("-----------------------------------");
 
 			Serial.println("LEFT WHEEL");
-			Serial.printf("ANG   | init    :%7.2f  cur :%7.2f  abs     :%7.2f  rel :%7.2f\n",
+			Serial.printf("ANG   | init    :%7.2f  cur :%7.2f  abs     :%7.2f  rel :%7.2f ref : %7.4f  lin : %7.4f\n",
 				left_encoder.initial_angular_position,
 				left_encoder.current_angular_position,
 				left_encoder.filtered_absolute_angular_position,
-				left_encoder.filtered_relative_angular_position
+				left_encoder.filtered_relative_angular_position,
+				left_encoder.velocity_reference,
+				left_encoder.filtered_linear_velocity
 			);
 			Serial.printf("CTRL  | abs_dist:%7.2f  ref :%7.2f  rel_dist:%7.2f\n",
 				current_position.absolute_distance_travelled_left_wheel,
@@ -165,16 +169,18 @@ void loop()
 			Serial.println("-----------------------------------");
 
 			Serial.println("RIGHT WHEEL");
-			Serial.printf("ANG   | init    :%7.2f  cur :%7.2f  abs     :%7.2f  rel :%7.2f\n",
+			Serial.printf("ANG   | init    :%7.2f  cur :%7.2f  abs     :%7.2f  rel :%7.2f ref : %7.4f  lin : %7.4f \n",
 				right_encoder.initial_angular_position,
 				right_encoder.current_angular_position,
 				right_encoder.filtered_absolute_angular_position,
-				right_encoder.filtered_relative_angular_position
+				right_encoder.filtered_relative_angular_position,
+				right_encoder.velocity_reference,
+				right_encoder.filtered_linear_velocity
 			);
-			Serial.printf("CTRL  | abs_dist:%7.2f  ref :%7.2f  rel_dist:%7.2f\n",
+			Serial.printf("CTRL  | abs_dist:%7.2f  ref :%7.2f  rel_dist:%7.2f \n",
 				current_position.absolute_distance_travelled_right_wheel,
 				right_distance_reference,
-				current_position.relative_distance_travelled_right_wheel
+				current_position.relative_distance_travelled_right_wheel				
 			);
 		}
 		else{
@@ -182,27 +188,70 @@ void loop()
 		}
 
 	}
-	else if (motors_control_state == AUTOMATIC){
-
+	else if (motors_control_state == AUTOMATIC) {
 		if(print_command){
-
 			if (!cleared_screen) {
-				Serial.print("\033[2J");
+				Serial.print("\033[2J"); 
 				cleared_screen = true;
 			}
 
-			Serial.println("\033[H");
-			Serial.printf("current position - x : %8.2f y : %8.2f theta : %8.2f ang_vel : %8.5f °/s lin_vel : %8.5f m/s",
-				robot_state.x, 
-				robot_state.y, 
-				robot_state.theta, 
+			Serial.print("\033[H");  // home
+
+			Serial.println("=========== ROBOT STATE ===========");
+
+			Serial.printf("POSITION   | X:%7.2f  Y:%7.2f  TH:%7.2f\n",
+				robot_state.x,
+				robot_state.y,
+				robot_state.theta
+			);
+
+			Serial.printf("VELOCITY   | LINEAR - REF: %7.4f  CUR: %7.4f m/s\n",
+				linear_velocity_reference,
+				robot_state.current_linear_velocity
+			);
+			Serial.printf("VELOCITY   | ANGULAR - REF: %7.4f  CUR: %7.4f  rad/s\n",
 				angular_velocity_reference,
-				linear_velocity_reference
+				robot_state.current_angular_velocity
+			);
+
+			Serial.println("-----------------------------------");
+
+			Serial.println("LEFT WHEEL");
+			Serial.printf("ANG   | init    :%7.2f  cur :%7.2f  abs     :%7.2f  rel :%7.2f ref : %7.4f  lin : %7.4f\n",
+				left_encoder.initial_angular_position,
+				left_encoder.current_angular_position,
+				left_encoder.filtered_absolute_angular_position,
+				left_encoder.filtered_relative_angular_position,
+				left_encoder.velocity_reference,
+				left_encoder.filtered_linear_velocity
+			);
+			Serial.printf("CTRL  | abs_dist:%7.2f  ref :%7.2f  rel_dist:%7.2f\n",
+				current_position.absolute_distance_travelled_left_wheel,
+				left_distance_reference,
+				current_position.relative_distance_travelled_left_wheel
+			);
+
+			Serial.println("-----------------------------------");
+
+			Serial.println("RIGHT WHEEL");
+			Serial.printf("ANG   | init    :%7.2f  cur :%7.2f  abs     :%7.2f  rel :%7.2f ref : %7.4f  lin : %7.4f \n",
+				right_encoder.initial_angular_position,
+				right_encoder.current_angular_position,
+				right_encoder.filtered_absolute_angular_position,
+				right_encoder.filtered_relative_angular_position,
+				right_encoder.velocity_reference,
+				right_encoder.filtered_linear_velocity
+			);
+			Serial.printf("CTRL  | abs_dist:%7.2f  ref :%7.2f  rel_dist:%7.2f \n",
+				current_position.absolute_distance_travelled_right_wheel,
+				right_distance_reference,
+				current_position.relative_distance_travelled_right_wheel				
 			);
 		}
 		else{
 			cleared_screen = false;
 		}
+
 	}
 	else if (motors_control_state == EMERGENCY_STOP){
 

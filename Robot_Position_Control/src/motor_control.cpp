@@ -2,7 +2,7 @@
 #include "rotary_encoder_AS5048.h"
 #include "odometry.h"
 
-#define MOTOR_PERIOD_MS 1.0f
+#define MOTOR_PERIOD_MS 2.0f
 #define DT_SEC (MOTOR_PERIOD_MS / 1000.0f)
 
 #define CLOCKWISE LOW
@@ -20,8 +20,8 @@ bool turn_flag = false;
 
 PIDController left_position_PID_coefficients = {500, 0.25, 0.1, 0, 0};
 PIDController right_position_PID_coefficients = {500, 0.25, 0.1, 0, 0};
-PIDController left_velocity_PID_coefficients = {2000, 0.25, 0.1, 0, 0};
-PIDController right_velocity_PID_coefficients = {2000, 0.25, 0.1, 0, 0};
+PIDController left_velocity_PID_coefficients = {1500.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+PIDController right_velocity_PID_coefficients = {1500.0f, 0.0f, 0.0f, 0.0f, 0.0f};
 
 volatile MotorState left_motor_state;
 volatile MotorState right_motor_state;
@@ -241,10 +241,10 @@ void right_motor_velocity_control_task(void *parameter) {
 		if (motors_control_state == AUTOMATIC) {
 
 			portENTER_CRITICAL(&HSPIMutex);
-			float right_velocity_reference = linear_velocity_reference + (angular_velocity_reference * ((WHEEL_BASE_MM / 1000.0f) / 2.0f));
+			right_encoder.velocity_reference = linear_velocity_reference + (angular_velocity_reference * ((WHEEL_BASE_MM / 1000.0f) / 2.0f));
 			portEXIT_CRITICAL(&HSPIMutex);
 
-			float right_angular_velocity_reference  = right_velocity_reference  / ( WHEEL_RADIUS_MM / 1000.0f);
+			float right_angular_velocity_reference  = right_encoder.velocity_reference / ( WHEEL_RADIUS_MM / 1000.0f);
 			current_frequency  = (right_angular_velocity_reference  / (2 * PI)) * STEPS_PER_REV;
 
 			portENTER_CRITICAL(&RightEncoderMutex);
@@ -252,7 +252,7 @@ void right_motor_velocity_control_task(void *parameter) {
 			float right_current_velocity = right_encoder.filtered_linear_velocity;
 			portEXIT_CRITICAL(&RightEncoderMutex);
 
-			float velocity_error = right_velocity_reference - right_current_velocity;
+			float velocity_error = right_encoder.velocity_reference - right_current_velocity;
 			
 			current_frequency = PID_control(velocity_error, current_frequency, &right_velocity_PID_coefficients);
 			current_frequency = constrain(current_frequency, -maximum_frequency, maximum_frequency);
@@ -304,10 +304,10 @@ void left_motor_velocity_control_task(void *parameter) {
 		if(motors_control_state == AUTOMATIC){
 
 			portENTER_CRITICAL(&HSPIMutex);
-			float left_velocity_reference  = linear_velocity_reference - (angular_velocity_reference * (( WHEEL_BASE_MM / 1000.0f) / 2.0f));
+			left_encoder.velocity_reference  = linear_velocity_reference - (angular_velocity_reference * (( WHEEL_BASE_MM / 1000.0f) / 2.0f));
 			portEXIT_CRITICAL(&HSPIMutex);
 			
-			float left_angular_velocity_reference  = left_velocity_reference  / ( WHEEL_RADIUS_MM / 1000.0f);
+			float left_angular_velocity_reference  = left_encoder.velocity_reference / ( WHEEL_RADIUS_MM / 1000.0f);
 
 			current_frequency  = (left_angular_velocity_reference  / (2 * PI)) * STEPS_PER_REV;
 
@@ -316,7 +316,7 @@ void left_motor_velocity_control_task(void *parameter) {
 			float left_current_velocity = left_encoder.filtered_linear_velocity;
 			portEXIT_CRITICAL(&LeftEncoderMutex);
 
-			float velocity_error = left_velocity_reference - left_current_velocity;
+			float velocity_error = left_encoder.velocity_reference - left_current_velocity;
 			
 			current_frequency = PID_control(velocity_error, current_frequency, &left_velocity_PID_coefficients);
 			current_frequency = constrain(current_frequency, -maximum_frequency, maximum_frequency);

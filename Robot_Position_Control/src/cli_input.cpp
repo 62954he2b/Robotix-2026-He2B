@@ -18,7 +18,7 @@ bool print_command = false;
 volatile bool right_motor_enabled = false;
 volatile bool left_motor_enabled = false;
 
-DataFromPi commands = {0.0f, 0.0f, 0.0f};
+DataFromPi commands = {0x00 , 0.0f, 0.0f, 0.0f};
 
 portMUX_TYPE HSPIMutex = portMUX_INITIALIZER_UNLOCKED;
 
@@ -224,6 +224,7 @@ void command_handler(String command) {
 void read_write_HSPI_task(void *parameter) {
 
 	static constexpr size_t BUFFER_SIZE = 20;
+	bool frame_validated = false;
 
 	uint8_t tx_buf[BUFFER_SIZE] {0};
 	uint8_t rx_buf[BUFFER_SIZE] {0};
@@ -236,23 +237,28 @@ void read_write_HSPI_task(void *parameter) {
 
     	HSPI_queue(tx_buf, rx_buf, BUFFER_SIZE);
 
-    	memcpy(&commands, rx_buf, sizeof(DataFromPi));
+		frame_validated = validate_frame(rx_buf, BUFFER_SIZE);
 
-		portENTER_CRITICAL(&HSPIMutex);
-		angular_velocity_reference = commands.target_angular_velocity;
-		linear_velocity_reference = commands.target_linear_velocity;
-		portEXIT_CRITICAL(&HSPIMutex);
-		
-		if(commands.emergency_stop > 0.5f && previous_state != EMERGENCY_STOP){
-			buffer_state = motors_control_state;
-			motors_control_state = EMERGENCY_STOP;
-			previous_state = motors_control_state;
-		}
-		if (commands.emergency_stop <= 0.5f && previous_state == EMERGENCY_STOP){
-			motors_control_state = buffer_state;
-			previous_state = motors_control_state;
-		}
+		if (frame_validated == true){
 
+			memcpy(&commands, rx_buf, sizeof(DataFromPi));
+
+			portENTER_CRITICAL(&HSPIMutex);
+			linear_velocity_reference = commands.target_linear_velocity;
+			angular_velocity_reference = commands.target_angular_velocity;
+			portEXIT_CRITICAL(&HSPIMutex);
+			
+			// if(commands.emergency_stop > 0.5f && previous_state != EMERGENCY_STOP){
+			// 	buffer_state = motors_control_state;
+			// 	motors_control_state = EMERGENCY_STOP;
+			// 	previous_state = motors_control_state;
+			// }
+			// if (commands.emergency_stop <= 0.5f && previous_state == EMERGENCY_STOP){
+			// 	motors_control_state = buffer_state;
+			// 	previous_state = motors_control_state;
+			// }
+		}
+    	
 		vTaskDelay(10 / portTICK_PERIOD_MS);
     }
 }
@@ -289,3 +295,25 @@ void read_wifi_input_task(void *parameter) {
 	}
 }
 
+uint8_t compute_checksum(const uint8_t *data, size_t len) {
+    uint8_t sum = 0;
+
+    for (size_t i = 0; i < (len-1) ; i++) {
+        sum += data[i];
+
+		// Serial.printf("%02X ", data[i]);
+    }
+	// Serial.printf("%02X", sum);
+	// Serial.println();
+
+    return sum;
+}
+
+bool validate_frame(const uint8_t *frame, size_t buffer_size) {
+    if (frame[0] != START_BYTE) {
+        return 0;
+    }
+
+    uint8_t expected = compute_checksum(frame, buffer_size);
+    return (frame[19] == expected);
+}

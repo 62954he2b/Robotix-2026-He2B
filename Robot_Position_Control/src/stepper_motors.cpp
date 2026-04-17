@@ -11,7 +11,7 @@ AccelStepper right_stepper(AccelStepper::DRIVER, STEP_PIN_RIGHT, DIR_PIN_RIGHT);
 void setupDriver(TMC5160Stepper &driver) {
   driver.begin();
   driver.toff(4); 
-  driver.rms_current(1000); // en mA
+  driver.rms_current(1500); // en mA
   driver.microsteps(MICROSTEPS);
   driver.en_pwm_mode(false);
   driver.pwm_autoscale(true); // Auto courant
