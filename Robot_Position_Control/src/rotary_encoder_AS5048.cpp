@@ -10,16 +10,9 @@ EncoderAS5048 left_encoder {
     .period_us = 0,
     .sampled = false,
 
-    .median_buf = {0},
-    .average_buf = {0}, 
-    .median_index = 0,
-    .average_index = 0,
-
     .initial_angular_position = 0.0,
     .absolute_angular_position = 0.0,
     .current_angular_position = 0.0,
-    .revolution_counter = 0,
-    .angular_velocity = 0.0,
     .filtered_absolute_angular_position = 0.0,
     .previous_filtered_absolute_angular_position = 0.0,
     .filtered_relative_angular_position = 0.0,
@@ -38,16 +31,9 @@ EncoderAS5048 right_encoder {
     .period_us = 0,
     .sampled = false,
 
-    .median_buf = {0},
-    .average_buf = {0}, 
-    .median_index = 0,
-    .average_index = 0,
-
     .initial_angular_position = 0.0,
     .absolute_angular_position = 0.0,
     .current_angular_position = 0.0,
-    .revolution_counter = 0,
-    .angular_velocity = 0.0,
     .filtered_absolute_angular_position = 0.0,
     .previous_filtered_absolute_angular_position = 0.0,
     .filtered_relative_angular_position = 0.0,
@@ -68,7 +54,6 @@ void left_encoder_reading_task(void *parameter) {
     static uint32_t current_time = 0;
     static uint32_t previous_time = 0;
 
-    // Etat local du filtre
     static float median_buf[MEDIAN_SIZE] = {0.0f};
     static float average_buf[AVG_SIZE] = {0.0f};
     static int median_index = 0;
@@ -122,7 +107,6 @@ void left_encoder_reading_task(void *parameter) {
                 goto delay;
             }
 
-            // 1) Unwrap du raw angle pour obtenir un angle continu
             float deltaRaw = rawAngle - previousAngularPosition;
 
             if (deltaRaw > 180.0f) {
@@ -141,7 +125,7 @@ void left_encoder_reading_task(void *parameter) {
             continuousRawAngle += deltaRaw;
             previousAngularPosition = rawAngle;
 
-            // 2) Filtre médian sur l’angle continu
+            // FILTRE MEDIAN
             median_buf[median_index] = continuousRawAngle;
             median_index++;
             if (median_index >= MEDIAN_SIZE) median_index = 0;
@@ -161,7 +145,7 @@ void left_encoder_reading_task(void *parameter) {
 
             float median = temp[MEDIAN_SIZE / 2];
 
-            // 3) Moyenne glissante
+            // MOYENNE GLISSANTE
             average_buf[average_index] = median;
             average_index++;
             if (average_index >= AVG_SIZE) average_index = 0;
@@ -172,12 +156,10 @@ void left_encoder_reading_task(void *parameter) {
             }
             float averaged = sum / AVG_SIZE;
 
-            // 4) Filtre IIR
+            // FILTRE IIR
             const float alpha = 0.1f;
-            filteredContinuousAngle =
-                alpha * averaged + (1.0f - alpha) * filteredContinuousAngle;
+            filteredContinuousAngle = alpha * averaged + (1.0f - alpha) * filteredContinuousAngle;
 
-            // Position absolue gauche à partir de l’angle filtré
             float filteredAbsoluteAngle = (filteredContinuousAngle - initialAngularPosition);
 
             current_time = micros();
@@ -220,7 +202,6 @@ void right_encoder_reading_task(void *parameter) {
     static uint32_t previous_time = 0;
     int revolutionCounter = 0;
 
-    // Etat local du filtre
     static float median_buf[MEDIAN_SIZE] = {0.0f};
     static float average_buf[AVG_SIZE] = {0.0f};
     static int median_index = 0;
@@ -274,7 +255,6 @@ void right_encoder_reading_task(void *parameter) {
                 goto delay;
             }
 
-            // 1) Unwrap du raw angle pour obtenir un angle continu
             float deltaRaw = rawAngle - previousAngularPosition;
 
             if (deltaRaw > 180.0f) {
@@ -284,7 +264,6 @@ void right_encoder_reading_task(void *parameter) {
                 deltaRaw += 360.0f;
             }
 
-            // Optionnel mais conseillé
             if (fabsf(deltaRaw) > DELTA_MAX_ALLOWED) {
                 previousAngularPosition = rawAngle;
                 previous_time = micros();
@@ -294,7 +273,7 @@ void right_encoder_reading_task(void *parameter) {
             continuousRawAngle += deltaRaw;
             previousAngularPosition = rawAngle;
 
-            // 2) Filtre médian sur l'angle continu
+            // FILTRE MEDIAN
             median_buf[median_index] = continuousRawAngle;
             median_index++;
             if (median_index >= MEDIAN_SIZE) median_index = 0;
@@ -314,7 +293,7 @@ void right_encoder_reading_task(void *parameter) {
 
             float median = temp[MEDIAN_SIZE / 2];
 
-            // 3) Moyenne glissante
+            // MOYENNE GLISSANTE
             average_buf[average_index] = median;
             average_index++;
             if (average_index >= AVG_SIZE) average_index = 0;
@@ -325,12 +304,11 @@ void right_encoder_reading_task(void *parameter) {
             }
             float averaged = sum / AVG_SIZE;
 
-            // 4) Filtre IIR
+            // FILTRE IIR
             const float alpha = 0.1f;
-            filteredContinuousAngle =
-                alpha * averaged + (1.0f - alpha) * filteredContinuousAngle;
+            filteredContinuousAngle = alpha * averaged + (1.0f - alpha) * filteredContinuousAngle;
 
-            // Position absolue droite à partir de l'angle filtré
+
             float filteredAbsoluteAngle = -(filteredContinuousAngle - initialAngularPosition);
 
             current_time = micros();
@@ -361,50 +339,4 @@ void right_encoder_reading_task(void *parameter) {
         delay :
             vTaskDelay(10 / portTICK_PERIOD_MS);
     }
-}
-
-void filter_angle_value(EncoderAS5048 *encoder) {
-    
-    //Filtre médian
-    encoder->median_buf[encoder->median_index] = encoder->absolute_angular_position;
-    (encoder->median_index)++;
-    if (encoder->median_index >= MEDIAN_SIZE) encoder->median_index = 0;
-
-    float temp[MEDIAN_SIZE];
-
-    memcpy(temp, encoder->median_buf, sizeof(temp));
-
-    for (int i = 0; i < MEDIAN_SIZE - 1; i++) {
-        for (int j = i + 1; j < MEDIAN_SIZE; j++) {
-            if (temp[j] < temp[i]) {
-                float t = temp[i];
-                temp[i] = temp[j];
-                temp[j] = t;
-            }
-        }
-    }
-
-    float median = temp[MEDIAN_SIZE / 2];
-
-    //Moyenne Glissante
-    encoder->average_buf[encoder->average_index] = median;
-    encoder->average_index++;
-    if (encoder->average_index >= AVG_SIZE) encoder->average_index = 0;
-
-    float sum = 0.0;
-    for (int i = 0; i < AVG_SIZE; i++) sum += encoder->average_buf[i];
-
-    float averaged = sum / AVG_SIZE;
-    float alpha = 0.5;   
-
-    //filtre IIR
-    encoder->filtered_absolute_angular_position = alpha * averaged + (1 - alpha) * encoder->filtered_absolute_angular_position;
-
-}
-
-void initialize_encoder(EncoderAS5048 *encoder) {
-    encoder->median_index = 0;
-    encoder->average_index = 0;
-
-    encoder->initialized = true;
 }

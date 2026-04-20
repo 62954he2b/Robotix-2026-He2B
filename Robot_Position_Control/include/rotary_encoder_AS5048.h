@@ -22,16 +22,9 @@ typedef struct {
     volatile uint32_t period_us;
     volatile bool sampled;
 
-    float median_buf[MEDIAN_SIZE];
-    float average_buf[AVG_SIZE]; 
-    int median_index;
-    int average_index;
-
     float initial_angular_position;
     float absolute_angular_position;
     float current_angular_position;
-    int revolution_counter;
-    float angular_velocity;
     float filtered_absolute_angular_position;
     float previous_filtered_absolute_angular_position;
     float filtered_relative_angular_position;
@@ -50,8 +43,6 @@ extern EncoderAS5048 right_encoder;
 extern portMUX_TYPE LeftEncoderMutex;
 extern portMUX_TYPE RightEncoderMutex;
 
-void initialize_encoder(EncoderAS5048 *encoder);
-void filter_angle_value(EncoderAS5048 *encoder);
 void left_encoder_reading_task(void *parameter);
 void right_encoder_reading_task(void *parameter);
 

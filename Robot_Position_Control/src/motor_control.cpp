@@ -48,7 +48,7 @@ void right_motor_position_control_task(void *parameter) {
 			if (right_motor_enabled == true) {
 
 				if (!right_encoder.initialized) {
-					initialize_encoder(&right_encoder);
+					left_encoder.initialized = true;
 					right_encoder.initial_angular_position = right_encoder.current_angular_position;
 					last_absolute_angular_position = right_encoder.filtered_absolute_angular_position;
 					right_motor_state = RUNNING;
@@ -151,7 +151,7 @@ void left_motor_position_control_task(void *parameter) {
 			if (left_motor_enabled == true) {
 
 				if (!left_encoder.initialized) {
-					initialize_encoder(&left_encoder);
+					left_encoder.initialized = true;
 					left_encoder.initial_angular_position = left_encoder.current_angular_position;
 					last_absolute_angular_position = left_encoder.filtered_absolute_angular_position;
 					left_motor_state = RUNNING;

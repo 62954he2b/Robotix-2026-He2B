@@ -79,12 +79,6 @@ void setup()
 	right_stepper.setMaxSpeed(2500);
 	right_stepper.setAcceleration(2500);
 
-	// initialize buffers
-	memset(left_encoder.median_buf, 0, sizeof(left_encoder.median_buf));
-    memset(left_encoder.average_buf, 0, sizeof(left_encoder.average_buf));
-	memset(right_encoder.median_buf, 0, sizeof(right_encoder.median_buf));
-    memset(right_encoder.average_buf, 0, sizeof(right_encoder.average_buf));
-
 	// Declare pins of encoders as inputs
     pinMode(LEFT_PWM_PIN, INPUT);
     pinMode(RIGHT_PWM_PIN, INPUT);
